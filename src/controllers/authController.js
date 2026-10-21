@@ -18,7 +18,7 @@ function identifierQuery(identifier) {
 // A patient who booked as a guest (Book Now, or a booking with only a mobile number) and later
 // registers or logs in with that mobile number gets those visits, records and requests in their account.
 const last10 = (v) => String(v || '').replace(/\D/g, '').slice(-10);
-async function linkGuestRecords(user) {
+export async function linkGuestRecords(user) {
   if (user.role !== 'patient') return;
   const phone = last10(user.phone);
   if (phone.length !== 10) return;
@@ -119,16 +119,35 @@ export const me = asyncHandler(async (req, res) => {
 
 // PUT /api/auth/me  { name, age, gender, city, phone, email }
 export const updateMe = asyncHandler(async (req, res) => {
+  const b = req.body;
+  // validate what the person typed before saving anything
+  if (b.phone !== undefined && b.phone !== '') {
+    b.phone = String(b.phone).replace(/\D/g, '').slice(-10);
+    if (!/^[6-9]\d{9}$/.test(b.phone)) throw new ApiError(400, 'Please enter a valid 10-digit mobile number');
+    if (await User.findOne({ phone: b.phone, _id: { $ne: req.user._id } })) throw new ApiError(409, 'This mobile number is already used by another account');
+  }
+  if (b.email !== undefined && b.email !== '') {
+    b.email = String(b.email).trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(b.email)) throw new ApiError(400, 'Please enter a valid email address');
+    if (await User.findOne({ email: b.email, _id: { $ne: req.user._id } })) throw new ApiError(409, 'This email is already used by another account');
+  }
+  if (b.pincode !== undefined && b.pincode !== '' && !/^[1-9]\d{5}$/.test(String(b.pincode))) throw new ApiError(400, 'Please enter a valid 6-digit PIN code');
+  if (b.age !== undefined && b.age !== '' && (!Number.isFinite(Number(b.age)) || Number(b.age) < 0 || Number(b.age) > 120)) throw new ApiError(400, 'Please enter a valid age');
+  if (b.careFor !== undefined && b.careFor !== '' && !['Myself', 'Parent', 'Spouse', 'Child', 'Other'].includes(b.careFor)) throw new ApiError(400, 'Invalid value for who needs care');
+
   const allowed = ['name', 'age', 'gender', 'city', 'pincode', 'careFor', 'phone', 'email', 'bloodGroup', 'emergencyContact'];
   ['allergies', 'conditions'].forEach((k) => {
-    if (req.body[k] !== undefined) req.user[k] = (Array.isArray(req.body[k]) ? req.body[k] : String(req.body[k]).split(',')).map((x) => String(x).trim()).filter(Boolean);
+    if (b[k] !== undefined) req.user[k] = (Array.isArray(b[k]) ? b[k] : String(b[k]).split(',')).map((x) => String(x).trim()).filter(Boolean);
   });
   allowed.forEach((k) => {
-    if (req.body[k] !== undefined && req.body[k] !== '') req.user[k] = req.body[k];
+    if (b[k] !== undefined && b[k] !== '') req.user[k] = typeof b[k] === 'string' ? b[k].trim() : b[k];
   });
-  if (req.body.password) {
-    if (String(req.body.password).length < 6) throw new ApiError(400, 'Password must be at least 6 characters');
-    req.user.password = req.body.password;
+  if (b.password) {
+    if (String(b.password).length < 6) throw new ApiError(400, 'Password must be at least 6 characters');
+    // the current password is needed to set a new one, so someone at an unlocked screen cannot take over the account
+    const withPw = await User.findById(req.user._id).select('+password');
+    if (!b.currentPassword || !(await withPw.matchPassword(String(b.currentPassword)))) throw new ApiError(400, 'Your current password is not correct');
+    req.user.password = b.password;
   }
   await req.user.save();
   res.json({ success: true, user: req.user.toJSON() });

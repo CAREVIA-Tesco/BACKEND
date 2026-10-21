@@ -72,6 +72,7 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     email,
     city: clean(b.city, 80),
     pincode: /^[1-9]\d{5}$/.test(String(b.pincode || '').trim()) ? String(b.pincode).trim() : undefined,
+    visitType: ['home', 'online', 'clinic'].includes(b.visitType) ? b.visitType : undefined,
     service: clean(b.service, 120),
     plan: clean(b.plan, 120),
     subject: clean(b.subject, 120),
@@ -219,6 +220,7 @@ const openView = (e) => ({
   patient: firstName(e.name),
   city: e.city,
   pincode: e.pincode,
+  visitType: e.visitType || 'home',
   service: e.service || 'General care',
   plan: e.plan,
   message: e.message,
@@ -252,7 +254,7 @@ export const acceptRequest = asyncHandler(async (req, res) => {
   }
   if (!providerMatches(enquiry, provider)) throw new ApiError(403, 'This request is for a different service or city');
   const appointment = await scheduleFromEnquiry(enquiry, provider, {
-    date: req.body?.date, time: req.body?.time, consultationType: req.body?.consultationType || 'home', status: 'Confirmed', assignedBy: 'provider', by: provider.name,
+    date: req.body?.date, time: req.body?.time, consultationType: req.body?.consultationType || enquiry.visitType || 'home', status: 'Confirmed', assignedBy: 'provider', by: provider.name,
   });
   res.status(201).json({ success: true, message: `Accepted – appointment ${appointment.code} added to your schedule`, appointment });
 });
@@ -286,7 +288,7 @@ export const assignRequest = asyncHandler(async (req, res) => {
   const provider = await Provider.findById(req.body?.providerId).catch(() => null);
   if (!provider || provider.status !== 'ACTIVE') throw new ApiError(404, 'Choose an active professional');
   const appointment = await scheduleFromEnquiry(enquiry, provider, {
-    date: req.body.date, time: req.body.time, consultationType: req.body.consultationType, status: 'Waiting', assignedBy: 'admin', by: req.user?.name || 'Admin',
+    date: req.body.date, time: req.body.time, consultationType: req.body.consultationType || enquiry.visitType, status: 'Waiting', assignedBy: 'admin', by: req.user?.name || 'Admin',
   });
   res.status(201).json({ success: true, message: `Sent to ${provider.name} – appointment ${appointment.code}`, appointment, enquiry });
 });

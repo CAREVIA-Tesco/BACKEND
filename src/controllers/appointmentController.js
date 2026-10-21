@@ -1,3 +1,4 @@
+import User from '../models/User.js';
 import Appointment from '../models/Appointment.js';
 import Provider from '../models/Provider.js';
 import Payment from '../models/Payment.js';
@@ -8,6 +9,13 @@ import { syncEnquiryFromAppointment } from '../services/requestFlow.js';
 const TITLES = { online: 'Online Consultation', clinic: 'Clinic Consultation', home: 'Home Consultation' };
 const LOCATIONS = { online: 'Virtual', clinic: 'Main Clinic', home: 'Patient Home' };
 const ACTIVE = ['Waiting', 'Confirmed'];
+
+// A professional sees the patient's phone number only once they have confirmed the booking
+function forViewer(appt, user) {
+  const j = appt.toJSON();
+  if (user?.role === 'doctor' && appt.status === 'Waiting') { j.phone = null; j.phoneHidden = true; }
+  return j;
+}
 
 // "09:00 AM" + date -> Date with that time (local server time)
 function combine(dateInput, timeSlot) {
@@ -69,13 +77,13 @@ export const listAppointments = asyncHandler(async (req, res) => {
   }
   const sort = scope === 'past' ? { scheduledAt: -1 } : scope === 'upcoming' ? { scheduledAt: 1 } : { createdAt: -1 };
   const appointments = await Appointment.find(filter).populate('provider', 'img').sort(sort).limit(500);
-  res.json({ success: true, count: appointments.length, appointments });
+  res.json({ success: true, count: appointments.length, appointments: appointments.map((a) => forViewer(a, req.user)) });
 });
 
 // GET /api/appointments/:id
 export const getAppointment = asyncHandler(async (req, res) => {
   const appointment = await loadForUser(req.params.id, req.user);
-  res.json({ success: true, appointment });
+  res.json({ success: true, appointment: forViewer(appointment, req.user) });
 });
 
 // POST /api/appointments   (booking flow – guests allowed, logged-in patients are linked)
@@ -98,12 +106,18 @@ export const createAppointment = asyncHandler(async (req, res) => {
 
   const isDoctorCategory = !serviceType || serviceType === 'home-doctor';
   const fee = feeFor(provider, consultationType, isDoctorCategory);
-  const patient = req.user && req.user.role === 'patient' ? req.user : null;
+  let patient = req.user && req.user.role === 'patient' ? req.user : null;
+  // admin booking on behalf of a registered patient (phone bookings)
+  if (req.user?.role === 'admin' && req.body.patientId) {
+    patient = await User.findOne({ _id: req.body.patientId, role: 'patient' });
+    if (!patient) throw new ApiError(404, 'Patient not found');
+  }
+  if (!patient && !patientInfo.name && req.user?.role === 'admin') throw new ApiError(400, 'Please choose a patient or enter the patient name');
   const paidOnline = consultationType === 'online';
 
   const appointment = await Appointment.create({
     patientUser: patient?._id,
-    patientName: patientInfo.name || patient?.name || req.user?.name || 'Guest Patient',
+    patientName: patientInfo.name || patient?.name || (req.user?.role === 'patient' ? req.user.name : '') || 'Guest Patient',
     patientPhone: patientInfo.phone || patient?.phone,
     patientEmail: patientInfo.email || patient?.email,
     reason: patientInfo.reason,

@@ -5,10 +5,12 @@ import { notFound, errorHandler } from './middleware/error.js';
 
 const app = express();
 
-const allowed = (process.env.CLIENT_URL || 'http://localhost:5173')
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
+// the live website is always allowed; add more origins (comma separated) in CLIENT_URL
+const allowed = [...new Set([
+  'https://www.carevaa.com',
+  'https://carevaa.com',
+  ...(process.env.CLIENT_URL || 'http://localhost:5173').split(',').map((o) => o.trim().replace(/\/$/, '')),
+])].filter(Boolean);
 
 app.use(
   cors({

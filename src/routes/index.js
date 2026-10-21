@@ -48,6 +48,7 @@ router.patch('/appointments/:id/status', protect, authorize('doctor', 'admin'), 
 // Admin
 router.get('/admin/stats', ...adminOnly, admin.dashboardStats);
 router.get('/admin/patients', ...adminOnly, admin.listPatients);
+router.post('/admin/patients', ...adminOnly, admin.createPatient);
 router.get('/admin/patients/:id', ...adminOnly, admin.getPatient);
 router.patch('/admin/patients/:id', ...adminOnly, admin.updatePatient);
 router.get('/admin/payments', ...adminOnly, admin.listPayments);

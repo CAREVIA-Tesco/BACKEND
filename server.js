@@ -22,7 +22,7 @@ try {
     const res = await Provider.updateMany({ status: 'PENDING' }, { status: 'ACTIVE', verifiedAt: new Date() });
     if (res.modifiedCount) console.log(`Published ${res.modifiedCount} pending doctor profile(s).`);
   }
-  app.listen(PORT, () => console.log(`Carevia API running on http://localhost:${PORT}`));
+  app.listen(PORT, () => console.log(`Carevaa API running on http://localhost:${PORT}`));
 } catch (err) {
   console.error('Failed to start server:', err.message);
   process.exit(1);

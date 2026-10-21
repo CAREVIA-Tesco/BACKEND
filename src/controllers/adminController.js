@@ -6,6 +6,7 @@ import Enquiry from '../models/Enquiry.js';
 import JobApplication from '../models/JobApplication.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
 import { shortDate } from '../utils/format.js';
+import { linkGuestRecords } from './authController.js';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const startOfToday = () => {
@@ -186,6 +187,32 @@ export const getPatient = asyncHandler(async (req, res) => {
 });
 
 // PATCH /api/admin/patients/:id  { status, name, phone, age, gender, city }
+// POST /api/admin/patients  (admin registers a patient who called in; they can log in with the phone/email + password)
+export const createPatient = asyncHandler(async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const phone = String(req.body.phone || '').replace(/\D/g, '').slice(-10);
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if (!name) throw new ApiError(400, 'Patient name is required');
+  if (!/^[6-9]\d{9}$/.test(phone)) throw new ApiError(400, 'Please enter a valid 10-digit mobile number');
+  if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new ApiError(400, 'Please enter a valid email address');
+  if (await User.findOne({ phone })) throw new ApiError(409, 'A patient with this mobile number already exists');
+  if (email && (await User.findOne({ email }))) throw new ApiError(409, 'An account with this email already exists');
+  if (req.body.pincode && !/^[1-9]\d{5}$/.test(String(req.body.pincode))) throw new ApiError(400, 'Please enter a valid 6-digit PIN code');
+  const age = req.body.age === '' || req.body.age === undefined ? undefined : Number(req.body.age);
+  if (age !== undefined && (!Number.isFinite(age) || age < 0 || age > 120)) throw new ApiError(400, 'Please enter a valid age');
+  // a temporary password the admin shares with the patient (they can change it from their dashboard)
+  const password = String(req.body.password || '') || `Care${Math.floor(100000 + Math.random() * 900000)}`;
+  if (password.length < 6) throw new ApiError(400, 'Password must be at least 6 characters');
+  const toList = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((x) => String(x).trim()).filter(Boolean);
+  const user = await User.create({
+    name, phone, email: email || undefined, password, role: 'patient',
+    age, gender: req.body.gender || undefined, city: req.body.city || undefined, pincode: req.body.pincode || undefined,
+    conditions: toList(req.body.conditions),
+  });
+  await linkGuestRecords(user).catch(() => {}); // earlier bookings made with this number now show in the account
+  res.status(201).json({ success: true, patient: user, temporaryPassword: req.body.password ? undefined : password });
+});
+
 export const updatePatient = asyncHandler(async (req, res) => {
   const allowed = ['status', 'name', 'phone', 'email', 'age', 'gender', 'city', 'bloodGroup', 'emergencyContact'];
   const update = Object.fromEntries(allowed.filter((k) => req.body[k] !== undefined).map((k) => [k, req.body[k]]));

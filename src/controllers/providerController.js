@@ -90,8 +90,9 @@ export const listProviders = asyncHandler(async (req, res) => {
   const filter = {};
   const isAdmin = req.user?.role === 'admin';
 
-  if (isAdmin && status && status !== 'ALL') filter.status = status;
-  else if (!isAdmin) filter.status = 'ACTIVE';
+  // the website only lists active professionals – also when an admin is signed in; admin pages ask for ?status=ALL
+  if (isAdmin && status === 'ALL') { /* every status */ } else if (isAdmin && status) filter.status = status;
+  else filter.status = 'ACTIVE';
 
   if (spec) filter.spec = spec;
   if (profession) filter.profession = profession;

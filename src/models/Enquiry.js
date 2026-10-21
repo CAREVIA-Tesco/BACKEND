@@ -33,6 +33,7 @@ const enquirySchema = new mongoose.Schema(
     email: { type: String, trim: true, lowercase: true },
     city: { type: String, trim: true },
     pincode: { type: String, trim: true },
+    visitType: { type: String, enum: ['home', 'online', 'clinic', null], default: null }, // asked in Book Now
     service: { type: String, trim: true },
     plan: { type: String, trim: true },
     subject: { type: String, trim: true },
@@ -77,6 +78,7 @@ const STATUS_TEXT = {
 };
 export const statusText = (s) => STATUS_TEXT[s] || s;
 
+const VISIT_LABEL = { home: 'Home visit', online: 'Online consultation', clinic: 'Clinic visit' };
 const base = (ret) => ({
   id: ret._id.toString(),
   code: ret.code,
@@ -86,6 +88,8 @@ const base = (ret) => ({
   email: ret.email,
   city: ret.city,
   pincode: ret.pincode,
+  visitType: ret.visitType,
+  visitTypeLabel: VISIT_LABEL[ret.visitType] || '',
   service: ret.service,
   plan: ret.plan,
   subject: ret.subject,

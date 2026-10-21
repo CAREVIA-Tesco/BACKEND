@@ -41,19 +41,42 @@ async function serviceCounts(svc) {
   return { ...svc.toJSON(), bookings };
 }
 
+const slugify = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const SERVICE_FIELDS = ['name', 'key', 'short', 'desc', 'price', 'image', 'order', 'icon', 'matches', 'status'];
+function serviceBody(body) {
+  const f = Object.fromEntries(SERVICE_FIELDS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
+  if (typeof f.name === 'string') f.name = f.name.trim();
+  if (f.key !== undefined) f.key = slugify(f.key);
+  if (f.matches !== undefined) f.matches = (Array.isArray(f.matches) ? f.matches : String(f.matches).split(',')).map((m) => String(m).trim()).filter(Boolean);
+  if (f.order !== undefined) f.order = Number(f.order) || 100;
+  if (f.image && !/^(https?:\/\/|\/|data:image\/(jpeg|png|webp);base64,)/.test(f.image)) throw new ApiError(400, 'Image must be a link (https://...) or an uploaded picture');
+  if (f.image && f.image.length > 900000) throw new ApiError(400, 'Image is too large – please use one under 600 KB');
+  return f;
+}
+const duplicate = (err) => {
+  if (err?.code === 11000) throw new ApiError(409, 'A service with this name or web address already exists');
+  throw err;
+};
+
 export const listServices = asyncHandler(async (_req, res) => {
-  const services = await Service.find().sort({ createdAt: 1 });
+  const services = await Service.find().sort({ order: 1, createdAt: 1 });
   res.json({ success: true, services: await Promise.all(services.map(serviceCounts)) });
 });
 
 export const createService = asyncHandler(async (req, res) => {
-  if (!req.body.name) throw new ApiError(400, 'Service name is required');
-  const svc = await Service.create(req.body);
+  const body = serviceBody(req.body);
+  if (!body.name) throw new ApiError(400, 'Service name is required');
+  if (!body.key) body.key = slugify(body.name);
+  if (body.order === undefined) body.order = (await Service.countDocuments()) + 1;
+  const svc = await Service.create(body).catch(duplicate);
   res.status(201).json({ success: true, service: await serviceCounts(svc) });
 });
 
 export const updateService = asyncHandler(async (req, res) => {
-  const svc = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+  const body = serviceBody(req.body);
+  if (body.name === '') throw new ApiError(400, 'Service name is required');
+  if (body.key === '') delete body.key;
+  const svc = await Service.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true }).catch(duplicate);
   if (!svc) throw new ApiError(404, 'Service not found');
   res.json({ success: true, service: await serviceCounts(svc) });
 });

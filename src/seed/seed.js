@@ -52,14 +52,21 @@ const SPECIALIZATIONS = [
   { name: 'Psychiatry', icon: 'Activity', matches: ['Psychiatrist'] },
 ];
 
+// The services listed on the website (Home, Our Services, Book Now). Admin can add, edit, hide or re-order them.
+// "key" is the web address: built-in keys open their own page, new ones open /services/<key>.
 const SERVICES = [
-  { name: 'Doctor Consultation', desc: 'Online doctor consultation with certified healthcare professionals.', price: '₹499', icon: 'Stethoscope', matches: ['General Physician', 'Pediatrician', 'Cardiologist', 'Dermatologist', 'Orthopedic', 'Gynecologist', 'Neurologist'] },
-  { name: 'Home Nursing', desc: 'Professional nursing care delivered right to your home.', price: '₹1,200', icon: 'Users', matches: ['Nurse', 'Care Taker'] },
-  { name: 'Physiotherapy', desc: 'Expert physiotherapy sessions for recovery and mobility.', price: '₹800', icon: 'HeartHandshake', matches: ['Physiotherapist'] },
-  { name: 'Lab Tests', desc: 'Home sample collection and quick accurate reports.', price: 'Variable', icon: 'FlaskConical', matches: ['Lab Centre'] },
-  { name: 'Homeopathy', desc: 'Consultations with expert homeopathic practitioners.', price: '₹399', icon: 'Pill', matches: ['Homeopathy Doctor'] },
-  { name: 'Ayurveda', desc: 'Traditional ayurvedic consultations and wellness plans.', price: '₹499', icon: 'Leaf', matches: ['Ayurveda Doctor'] },
+  { key: 'physiotherapy', name: 'Physiotherapy', short: 'Pain relief & rehab', desc: 'Recover from pain, injury or surgery with certified physios at home.', price: '₹800', icon: 'Activity', image: '/service-physio.png', matches: ['Physiotherapist'], order: 1 },
+  { key: 'nurse-care', name: 'Nurse Care', short: 'Skilled nursing at home', desc: 'Injections, IVs, wound care and post-hospital nursing by trained nurses.', price: '₹1,200', icon: 'Syringe', image: '/nurse-hero.jpg', matches: ['Nurse'], order: 2 },
+  { key: 'home-doctor', name: 'Home Doctor', short: 'Doctor at your doorstep', desc: 'General physicians who visit, diagnose and treat you at home.', price: '', icon: 'House', image: '/doctor-hero.png', matches: ['General Physician'], order: 3 },
+  { key: 'doctor-visit', name: 'Doctor Visit', short: 'Online & clinic consults', desc: 'Expert consultations online or at the clinic, with digital prescriptions.', price: '₹499', icon: 'Stethoscope', image: '/home-hero.jpg', matches: ['General Physician', 'Pediatrician', 'Cardiologist', 'Dermatologist', 'Orthopedic', 'Gynecologist', 'Neurologist'], order: 4 },
+  { key: 'care-taker', name: 'Care Taker', short: 'Elder & post-op care', desc: 'Trained attendants for elderly, post-operative and bedridden patients.', price: '', icon: 'Users', image: '/caretaker-section.png', matches: ['Care Taker'], order: 5 },
+  { key: 'baby-care', name: 'Baby Care', short: 'Mother & baby support', desc: 'Paediatric care and daily support for newborns, babies and new mothers.', price: '', icon: 'Baby', image: '/service-homecare.png', matches: ['Pediatrician'], order: 6 },
+  { key: 'ayurveda', name: 'Ayurveda', short: 'Natural healing', desc: 'Traditional Ayurvedic consultations and therapies at your doorstep.', price: '₹499', icon: 'Leaf', image: '/hero.png', matches: ['Ayurveda Doctor'], order: 7 },
+  { key: 'bhs', name: 'BHS', short: 'Basic health services', desc: 'Vitals monitoring, sample collection and essential health checks.', price: '', icon: 'HeartPulse', image: '/caretaker-hero.png', matches: ['BHS'], order: 8 },
+  { key: 'lab-tests', name: 'Lab Tests', short: 'Home sample collection', desc: 'Blood tests and diagnostics with home sample collection and quick, accurate reports from partner labs.', price: '', icon: 'FlaskConical', image: '/service-homecare.png', matches: ['Lab Centre'], order: 9 },
 ];
+// Names used by the first version of the catalog -> the website service they became
+const OLD_SERVICE_NAMES = { 'Doctor Consultation': 'doctor-visit', 'Home Nursing': 'nurse-care', Physiotherapy: 'physiotherapy', 'Lab Tests': 'lab-tests', Ayurveda: 'ayurveda', Homeopathy: 'homeopathy' };
 
 // Website content (previously hard-coded in the React pages) – editable via PUT /api/content/:key
 const CONTENT = {
@@ -376,6 +383,30 @@ export async function seedDatabase({ reset = false, silent = false } = {}) {
   }
   await upgradeBlogPosts(log);
   await renameBrand(log);
+  await syncServices(log);
+}
+
+// Older databases have a separate admin service list that the website did not use. Give every service a web
+// address and make sure the services shown on the website exist, so admin changes appear on the site.
+async function syncServices(log) {
+  let changed = 0;
+  for (const svc of await Service.find({ $or: [{ key: { $exists: false } }, { key: null }, { key: '' }] })) {
+    const key = OLD_SERVICE_NAMES[svc.name] || slugify(svc.name);
+    const seeded = SERVICES.find((x) => x.key === key);
+    if (seeded && (await Service.findOne({ key }))) continue; // already present under its new name
+    svc.key = key;
+    if (seeded) Object.assign(svc, { name: seeded.name, short: svc.short || seeded.short, image: svc.image || seeded.image, icon: seeded.icon, order: seeded.order, matches: seeded.matches, desc: seeded.desc });
+    else if (!svc.order || svc.order === 100) svc.order = 20;
+    await svc.save();
+    changed += 1;
+  }
+  for (const seeded of SERVICES) {
+    if (await Service.findOne({ key: seeded.key })) continue;
+    if (await Service.findOne({ name: seeded.name })) { await Service.updateOne({ name: seeded.name }, { $set: { key: seeded.key } }); changed += 1; continue; }
+    await Service.create(seeded);
+    changed += 1;
+  }
+  if (changed) log(`  ✓ website services synced (${changed} updated)`);
 }
 
 // The brand was renamed from Carevia to Carevaa: update website text already saved in older databases.
