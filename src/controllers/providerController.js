@@ -3,6 +3,7 @@ import Appointment from '../models/Appointment.js';
 import User from '../models/User.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
 import { specFor, DOCTOR_PROFESSIONS } from '../utils/format.js';
+import { notifyAdmins, notifyProvider, LINKS } from '../services/notify.js';
 
 // Doctors go live on the site as soon as they finish onboarding (admin can still reject / suspend).
 // Set PROVIDER_AUTO_APPROVE=false in .env to require manual admin approval instead.
@@ -157,6 +158,7 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
   if (!req.body.profession) throw new ApiError(400, 'Please select your profession');
 
   let provider = await Provider.findOne({ user: req.user._id });
+  const isNew = !provider;
   if (provider) {
     Object.assign(provider, fields);
     if (provider.status === 'PENDING' && autoApprove()) {
@@ -176,6 +178,9 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
   if (!provider.img) provider.img = avatarFor(provider.name);
   await provider.save();
 
+  if (isNew) {
+    notifyAdmins({ type: 'account', title: provider.status === 'ACTIVE' ? 'New professional joined' : 'Professional waiting for verification', body: `${provider.name} (${provider.spec || provider.profession || 'professional'}${provider.city ? `, ${provider.city}` : ''}) completed their profile.`, link: `/admin/providers/${provider._id}` });
+  }
   req.user.provider = provider._id;
   if (fields.name && req.user.name !== fields.name) req.user.name = fields.name;
   await req.user.save();
@@ -211,9 +216,19 @@ export const updateProviderStatus = asyncHandler(async (req, res) => {
   if (!['PENDING', 'ACTIVE', 'REJECTED', 'SUSPENDED'].includes(status)) throw new ApiError(400, 'Invalid status');
   const provider = await Provider.findById(req.params.id);
   if (!provider) throw new ApiError(404, 'Provider not found');
+  const previous = provider.status;
   provider.status = status;
   if (status === 'ACTIVE') provider.verifiedAt = new Date();
   await provider.save();
+  if (previous !== status) {
+    const msg = {
+      ACTIVE: ['Your profile is approved', 'Your Carevaa profile is live. Patients can now find and book you.'],
+      REJECTED: ['Profile not approved', 'Your profile could not be approved. Please check your details or contact the Carevaa team.'],
+      SUSPENDED: ['Profile paused', 'Your profile has been paused by the Carevaa team. Please contact support.'],
+      PENDING: ['Profile under review', 'Your profile is being reviewed by the Carevaa team.'],
+    }[status];
+    await notifyProvider(provider, { type: 'account', title: msg[0], body: msg[1], link: LINKS.doctor('My Profile') });
+  }
   res.json({ success: true, provider });
 });
 

@@ -1,6 +1,7 @@
 import EmergencyRequest from '../models/EmergencyRequest.js';
 import Provider from '../models/Provider.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
+import { notifyAdmins } from '../services/notify.js';
 
 // POST /api/emergency  (public – logged-in patient is linked automatically)
 export const createEmergency = asyncHandler(async (req, res) => {
@@ -18,6 +19,7 @@ export const createEmergency = asyncHandler(async (req, res) => {
     priority,
     notes,
   });
+  await notifyAdmins({ type: 'urgent', title: 'Emergency request', body: `${name} (${phone}) – ${type || 'emergency'} at ${location}.`, link: '/admin/emergency' });
   res.status(201).json({ success: true, message: 'Emergency request received. Our team will call you shortly.', request });
 });
 

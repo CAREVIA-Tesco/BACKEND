@@ -3,10 +3,35 @@ import Provider from '../models/Provider.js';
 import Appointment from '../models/Appointment.js';
 import { providerMatches, matchingProviders, scheduleFromEnquiry, OPEN_STATUSES } from '../services/requestFlow.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
+import { notifyAdmins, notifyUser, notifyUsers, LINKS } from '../services/notify.js';
 
 const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 const clean = (v, max = 200) => (v === undefined || v === null ? undefined : String(v).trim().slice(0, max) || undefined);
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const TYPE_TITLE = { booking: 'New booking request', callback: 'New callback request', plan: 'New care plan enquiry', requirement: 'New requirement posted', contact: 'New contact message', partner: 'New partnership enquiry', referral: 'New referral' };
+// a new lead: tell the care team, and for Book Now also the matching professionals
+async function notifyNewEnquiry(enquiry) {
+  const place = [enquiry.locality, enquiry.city].filter(Boolean).join(', ');
+  const when = enquiry.preferredDate ? ` on ${enquiry.toPublic().preferredDateLabel}${enquiry.preferredTime ? `, ${enquiry.preferredTime}` : ''}` : '';
+  await notifyAdmins({
+    type: 'request',
+    title: TYPE_TITLE[enquiry.type] || 'New enquiry',
+    body: `${enquiry.code}: ${enquiry.name}${enquiry.service ? ` – ${enquiry.service}` : ''}${place ? ` in ${place}` : ''}${when}.`,
+    link: `/admin/enquiries?q=${enquiry.code}`,
+  });
+  if (enquiry.broadcast) {
+    try {
+      const providers = await matchingProviders(enquiry);
+      await notifyUsers(providers.map((p) => p.user), {
+        type: 'request',
+        title: 'New care request near you',
+        body: `${enquiry.service || 'Care visit'}${place ? ` in ${place}` : ''}${when}. Accept it before someone else does.`,
+        link: LINKS.doctor('Care Requests'),
+      });
+    } catch (e) { console.warn(`[notify] ${e.message}`); }
+  }
+}
 
 // POST /api/enquiries  (public; a logged-in patient is linked automatically)
 export const createEnquiry = asyncHandler(async (req, res) => {
@@ -91,6 +116,8 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     broadcastAt: type === 'booking' ? new Date() : undefined,
   });
 
+  await notifyNewEnquiry(enquiry);
+
   const messages = {
     booking: 'Thank you! Our care advisor will call you shortly to confirm your visit.',
     contact: 'Thanks for writing to us. Our team will get back to you within one working day.',
@@ -133,6 +160,7 @@ export const cancelEnquiry = asyncHandler(async (req, res) => {
   if (['Converted', 'Closed'].includes(enquiry.status)) throw new ApiError(400, `This request is already ${enquiry.status.toLowerCase()}`);
   enquiry.status = 'Closed';
   enquiry.closedReason = 'Cancelled by customer';
+  notifyAdmins({ type: 'request', title: 'Request cancelled', body: `${enquiry.code}: ${enquiry.name} cancelled their ${enquiry.service || 'care'} request.`, link: `/admin/enquiries?q=${enquiry.code}` });
   enquiry.timeline.push({ status: 'Closed', note: 'You cancelled this request.' });
   await enquiry.save();
   res.json({ success: true, message: 'Request cancelled', enquiry: enquiry.toPublic() });
@@ -210,6 +238,11 @@ export const updateEnquiry = asyncHandler(async (req, res) => {
   if (clean(b.note, 1000)) enquiry.notes.push({ text: clean(b.note, 1000), by });
 
   await enquiry.save();
+  // the customer sees a new line on their request -> tell them too
+  const latest = enquiry.timeline[enquiry.timeline.length - 1];
+  if (enquiry.patientUser && latest && Date.now() - new Date(latest.at).getTime() < 5000 && (b.status || clean(b.publicNote, 300))) {
+    await notifyUser(enquiry.patientUser, { type: 'request', title: `Request ${enquiry.code}: ${enquiry.status}`, body: latest.note, link: LINKS.patient('Requests') });
+  }
   res.json({ success: true, enquiry });
 });
 

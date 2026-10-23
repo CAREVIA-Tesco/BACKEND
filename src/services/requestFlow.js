@@ -13,6 +13,7 @@ import Provider from '../models/Provider.js';
 import User from '../models/User.js';
 import { ApiError } from '../middleware/error.js';
 import { feeFor } from '../utils/format.js';
+import { notifyAppointment } from './notify.js';
 
 // website service title -> provider "spec" values
 const SERVICE_SPECS = {
@@ -159,6 +160,7 @@ export async function scheduleFromEnquiry(enquiry, provider, { date, time, consu
   });
   enquiry.notes.push({ text: `${assignedBy === 'admin' ? 'Assigned to' : 'Accepted by'} ${provider.name} – ${appointment.code}`, by });
   await enquiry.save();
+  await notifyAppointment(appointment, 'Booked', assignedBy === 'admin' ? 'admin' : 'doctor');
   return appointment;
 }
 

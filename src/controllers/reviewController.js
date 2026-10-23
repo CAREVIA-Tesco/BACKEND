@@ -2,6 +2,7 @@ import Review from '../models/Review.js';
 import Appointment from '../models/Appointment.js';
 import Provider from '../models/Provider.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
+import { notifyProvider, LINKS } from '../services/notify.js';
 
 // Recalculate a provider's average rating and review count
 export async function refreshProviderRating(providerId) {
@@ -38,6 +39,7 @@ export const createReview = asyncHandler(async (req, res) => {
   appt.reviewed = true;
   await appt.save();
   await refreshProviderRating(appt.provider);
+  await notifyProvider(appt.provider, { type: 'review', title: `New ${rating}-star review`, body: `${String(req.user.name).split(' ')[0]} reviewed visit ${appt.code}${review.comment ? `: "${review.comment.slice(0, 120)}"` : '.'}`, link: LINKS.doctor('Reviews') });
   res.status(201).json({ success: true, message: 'Thank you for your feedback', review });
 });
 

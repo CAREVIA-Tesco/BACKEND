@@ -5,6 +5,7 @@ import Payment from '../models/Payment.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
 import { feeFor } from '../utils/format.js';
 import { syncEnquiryFromAppointment } from '../services/requestFlow.js';
+import { notifyAppointment } from '../services/notify.js';
 
 const TITLES = { online: 'Online Consultation', clinic: 'Clinic Consultation', home: 'Home Consultation' };
 const LOCATIONS = { online: 'Virtual', clinic: 'Main Clinic', home: 'Patient Home' };
@@ -150,6 +151,7 @@ export const createAppointment = asyncHandler(async (req, res) => {
     paidAt: paidOnline ? new Date() : undefined,
   });
 
+  await notifyAppointment(appointment, 'Booked', req.user?.role || 'guest');
   await appointment.populate('provider', 'img');
   res.status(201).json({ success: true, message: 'Appointment booked successfully', appointment });
 });
@@ -168,6 +170,7 @@ export const rescheduleAppointment = asyncHandler(async (req, res) => {
   appt.status = 'Confirmed';
   await appt.save();
   await syncEnquiryFromAppointment(appt, 'Rescheduled', req.user.role);
+  await notifyAppointment(appt, 'Rescheduled', req.user.role);
   res.json({ success: true, message: 'Appointment rescheduled', appointment: appt });
 });
 
@@ -191,6 +194,7 @@ export const completeAppointment = asyncHandler(async (req, res) => {
   }
   await appt.save();
   await syncEnquiryFromAppointment(appt, 'Completed', req.user.role);
+  await notifyAppointment(appt, 'Completed', req.user.role);
   res.json({ success: true, message: 'Visit completed', appointment: appt });
 });
 
@@ -222,6 +226,7 @@ export const cancelAppointment = asyncHandler(async (req, res) => {
   }
   await appt.save();
   await syncEnquiryFromAppointment(appt, 'Cancelled', req.user.role);
+  await notifyAppointment(appt, 'Cancelled', req.user.role);
   res.json({ success: true, message: 'Appointment cancelled', appointment: appt });
 });
 
@@ -235,6 +240,9 @@ export const updateAppointmentStatus = asyncHandler(async (req, res) => {
   appt.status = status;
   if (status === 'Cancelled') appt.cancelledBy = req.user.role;
   await appt.save();
-  if (status !== previous) await syncEnquiryFromAppointment(appt, status, req.user.role);
+  if (status !== previous) {
+    await syncEnquiryFromAppointment(appt, status, req.user.role);
+    await notifyAppointment(appt, status, req.user.role);
+  }
   res.json({ success: true, appointment: appt });
 });

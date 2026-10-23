@@ -12,6 +12,7 @@ import * as emergency from '../controllers/emergencyController.js';
 import * as publicApi from '../controllers/publicController.js';
 import * as enquiries from '../controllers/enquiryController.js';
 import * as pincode from '../controllers/pincodeController.js';
+import * as notifications from '../controllers/notificationController.js';
 import * as passwordReset from '../controllers/passwordResetController.js';
 
 const router = Router();
@@ -30,6 +31,12 @@ router.post('/auth/register', auth.register);
 router.post('/auth/login', auth.login);
 router.get('/auth/me', protect, auth.me);
 router.put('/auth/me', protect, auth.updateMe);
+
+// Notifications (bell icon in every dashboard)
+router.get('/notifications', protect, notifications.listNotifications);
+router.post('/notifications/read-all', protect, notifications.markAllRead);
+router.patch('/notifications/:id/read', protect, notifications.markRead);
+router.delete('/notifications', protect, notifications.clearNotifications);
 // Forgot password: SMS OTP through Twilio (patients and professionals only)
 router.post('/auth/forgot-password', passwordReset.forgotPassword);
 router.post('/auth/verify-otp', passwordReset.verifyOtp);

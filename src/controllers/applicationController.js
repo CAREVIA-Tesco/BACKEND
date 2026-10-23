@@ -1,5 +1,6 @@
 import JobApplication from '../models/JobApplication.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
+import { notifyAdmins } from '../services/notify.js';
 
 // POST /api/applications  (public "Find Jobs" / "Careers" forms)
 export const createApplication = asyncHandler(async (req, res) => {
@@ -7,6 +8,7 @@ export const createApplication = asyncHandler(async (req, res) => {
   if (!name || !String(name).trim()) throw new ApiError(400, 'Full name is required');
   if (!phone || String(phone).replace(/\D/g, '').length < 10) throw new ApiError(400, 'A valid 10-digit mobile number is required');
   const application = await JobApplication.create({ name, phone, email, role, city, experience, about, source });
+  await notifyAdmins({ type: 'account', title: 'New job application', body: `${name}${role ? ` applied for ${role}` : ' applied'}${city ? ` (${city})` : ''}.`, link: '/admin/applications' });
   res.status(201).json({ success: true, message: 'Application submitted successfully', application });
 });
 
