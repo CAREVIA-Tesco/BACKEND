@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { protect, optionalAuth, authorize } from '../middleware/auth.js';
+import { ApiError } from '../middleware/error.js';
 import * as auth from '../controllers/authController.js';
 import * as providers from '../controllers/providerController.js';
 import * as appointments from '../controllers/appointmentController.js';
@@ -53,7 +54,10 @@ router.patch('/providers/:id/status', ...adminOnly, providers.updateProviderStat
 router.delete('/providers/:id', ...adminOnly, providers.deleteProvider);
 
 // Appointments
-router.post('/appointments', optionalAuth, appointments.createAppointment);
+// Only the care team books appointments directly. Patients send a request (Book Now / Book on a
+// doctor's card -> /api/enquiries) and the admin arranges it with the doctor.
+const careTeamBooking = (req, _res, next) => (req.user?.role === 'admin' ? next() : next(new ApiError(403, 'Appointments are arranged by the Carevaa team. Please use Book Now and our care advisor will call you shortly.')));
+router.post('/appointments', optionalAuth, careTeamBooking, appointments.createAppointment);
 router.get('/appointments', protect, appointments.listAppointments);
 router.get('/appointments/:id', protect, appointments.getAppointment);
 router.patch('/appointments/:id/reschedule', protect, appointments.rescheduleAppointment);

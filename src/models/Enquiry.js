@@ -38,6 +38,10 @@ const enquirySchema = new mongoose.Schema(
     locality: { type: String, trim: true }, // post office / area picked from the PIN code lookup
     visitType: { type: String, enum: ['home', 'online', 'clinic', null], default: null }, // asked in Book Now
     service: { type: String, trim: true },
+    // a specific doctor the patient asked for ("Book" on a doctor's card) – the care team arranges it
+    requestedProvider: { type: mongoose.Schema.Types.ObjectId, ref: 'Provider' },
+    requestedProviderName: String,
+    requestedProviderSpec: String,
     plan: { type: String, trim: true },
     subject: { type: String, trim: true },
     organisation: { type: String, trim: true },
@@ -97,6 +101,9 @@ const base = (ret) => ({
   visitType: ret.visitType,
   visitTypeLabel: VISIT_LABEL[ret.visitType] || '',
   service: ret.service,
+  requestedProviderId: ret.requestedProvider?.toString(),
+  requestedProvider: ret.requestedProviderName,
+  requestedProviderSpec: ret.requestedProviderSpec,
   plan: ret.plan,
   subject: ret.subject,
   organisation: ret.organisation,

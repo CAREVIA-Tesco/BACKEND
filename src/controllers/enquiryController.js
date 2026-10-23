@@ -16,8 +16,8 @@ async function notifyNewEnquiry(enquiry) {
   const when = enquiry.preferredDate ? ` on ${enquiry.toPublic().preferredDateLabel}${enquiry.preferredTime ? `, ${enquiry.preferredTime}` : ''}` : '';
   await notifyAdmins({
     type: 'request',
-    title: TYPE_TITLE[enquiry.type] || 'New enquiry',
-    body: `${enquiry.code}: ${enquiry.name}${enquiry.service ? ` – ${enquiry.service}` : ''}${place ? ` in ${place}` : ''}${when}.`,
+    title: enquiry.requestedProviderName ? 'New doctor appointment request' : TYPE_TITLE[enquiry.type] || 'New enquiry',
+    body: `${enquiry.code}: ${enquiry.name}${enquiry.requestedProviderName ? ` wants ${enquiry.requestedProviderName}` : enquiry.service ? ` – ${enquiry.service}` : ''}${place ? ` in ${place}` : ''}${when}.`,
     link: `/admin/enquiries?q=${enquiry.code}`,
   });
   if (enquiry.broadcast) {
@@ -79,19 +79,32 @@ export const createEnquiry = asyncHandler(async (req, res) => {
   }
 
   // avoid duplicate leads when the same number submits the same request twice in 10 minutes
-  const recent = await Enquiry.findOne({
+  const recentList = await Enquiry.find({
     phone: { $regex: `${digits(phone)}$` },
     type,
     service: clean(b.service),
     status: 'New',
     createdAt: { $gte: new Date(Date.now() - 10 * 60 * 1000) },
   });
+  // a request for a different doctor is a new request, not a duplicate
+  const recent = recentList.find((e) => String(e.requestedProvider || '') === String(b.providerId || ''));
   if (recent) {
     return res.status(200).json({ success: true, duplicate: true, message: `We already have your request ${recent.code}. Our care advisor will call you shortly.`, enquiry: recent.toPublic() });
   }
 
+  // "Book" on a doctor's card: the request names that doctor, and the care team arranges it
+  // (it is not shared with professionals, so the doctor never gets the booking straight from the website)
+  let requested = null;
+  if (b.providerId) {
+    requested = await Provider.findById(b.providerId).catch(() => null);
+    if (!requested || requested.status !== 'ACTIVE') throw new ApiError(404, 'This doctor is not available for booking right now. Please choose another doctor or call us.');
+  }
+
   const enquiry = await Enquiry.create({
     type,
+    requestedProvider: requested?._id,
+    requestedProviderName: requested?.name,
+    requestedProviderSpec: requested?.spec,
     name,
     phone: digits(phone),
     email,
@@ -112,8 +125,8 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     referrer: type === 'referral' ? { name: clean(b.referrerName, 100), phone: digits(b.referrerPhone) } : undefined,
     patientUser: req.user?.role === 'patient' ? req.user._id : undefined,
     timeline: [{ status: 'New', note: statusText('New') }],
-    broadcast: type === 'booking',
-    broadcastAt: type === 'booking' ? new Date() : undefined,
+    broadcast: type === 'booking' && !requested,
+    broadcastAt: type === 'booking' && !requested ? new Date() : undefined,
   });
 
   await notifyNewEnquiry(enquiry);
