@@ -154,7 +154,7 @@ const CONTENT = {
     { q: 'Can I reschedule or cancel?', a: 'Yes. Appointments can be rescheduled to another open slot, and if a paid appointment is cancelled the payment is refunded automatically.' },
     { q: 'Do I get a record of the visit?', a: 'After each visit the professional records your vitals, symptoms and prescription. You can see them any time under My Records in your patient dashboard.' },
     { q: 'Which cities do you serve?', a: 'The cities we currently serve are listed on our homepage, and new cities are added as more professionals join. Online consultations are available from anywhere.' },
-    { q: 'How do I join Carevaa as a professional?', a: 'Choose "Doctor" on the login page, register and complete the onboarding form with your profession, fees, clinic and bank details. Your profile goes live for patients once it is submitted.' },
+    { q: 'How do I join Carevaa as a professional?', a: 'Choose "Doctor" on the login page, register and complete the onboarding form with your profession, fees, clinic and bank details. Our team reviews your details, and your profile goes live for patients once it is approved.' },
   ],
   theme: [{ palette: 'plum' }],
   // Legal pages – plain-language drafts, editable in Admin → Website Content. Have them reviewed before going live.

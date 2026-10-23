@@ -5,9 +5,9 @@ import { ApiError, asyncHandler } from '../middleware/error.js';
 import { specFor, DOCTOR_PROFESSIONS } from '../utils/format.js';
 import { notifyAdmins, notifyProvider, LINKS } from '../services/notify.js';
 
-// Doctors go live on the site as soon as they finish onboarding (admin can still reject / suspend).
-// Set PROVIDER_AUTO_APPROVE=false in .env to require manual admin approval instead.
-export const autoApprove = () => String(process.env.PROVIDER_AUTO_APPROVE ?? 'true').toLowerCase() !== 'false';
+// Professionals who register on the website start as PENDING and only appear on the site
+// (listings, search, profile page, booking) after an admin approves them (status ACTIVE).
+// Listing, profile and booking endpoints all check status === 'ACTIVE' on the server.
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const num = (v) => (v === '' || v === undefined || v === null || Number.isNaN(Number(v)) ? undefined : Number(v));
@@ -159,33 +159,34 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
 
   let provider = await Provider.findOne({ user: req.user._id });
   const isNew = !provider;
+  let resubmitted = false;
   if (provider) {
     Object.assign(provider, fields);
-    if (provider.status === 'PENDING' && autoApprove()) {
-      provider.status = 'ACTIVE';
-      provider.verifiedAt = new Date();
-    }
+    // a rejected professional who updates their details goes back into the review queue
+    if (provider.status === 'REJECTED') { provider.status = 'PENDING'; resubmitted = true; }
   } else {
     provider = new Provider({
       ...fields,
       user: req.user._id,
       email: req.user.email,
       phone: fields.phone || req.user.phone || fields.clinic?.phone,
-      status: autoApprove() ? 'ACTIVE' : 'PENDING',
-      verifiedAt: autoApprove() ? new Date() : undefined,
+      status: 'PENDING', // waits for admin approval
     });
   }
   if (!provider.img) provider.img = avatarFor(provider.name);
   await provider.save();
 
-  if (isNew) {
-    notifyAdmins({ type: 'account', title: provider.status === 'ACTIVE' ? 'New professional joined' : 'Professional waiting for verification', body: `${provider.name} (${provider.spec || provider.profession || 'professional'}${provider.city ? `, ${provider.city}` : ''}) completed their profile.`, link: `/admin/providers/${provider._id}` });
+  if (isNew || resubmitted) {
+    await notifyAdmins({ type: 'account', title: resubmitted ? 'Professional re-submitted for approval' : 'New professional waiting for approval', body: `${provider.name} (${provider.spec || provider.profession || 'professional'}${provider.city ? `, ${provider.city}` : ''}) ${resubmitted ? 'updated their details after rejection' : 'registered'}. Review and approve or reject.`, link: `/admin/providers/${provider._id}` });
   }
   req.user.provider = provider._id;
   if (fields.name && req.user.name !== fields.name) req.user.name = fields.name;
   await req.user.save();
 
-  res.status(201).json({ success: true, message: provider.status === 'ACTIVE' ? 'Profile is live – patients can now book you' : 'Profile submitted for verification', provider });
+  const message = provider.status === 'ACTIVE' ? 'Profile updated – it is live on the website'
+    : provider.status === 'PENDING' ? 'Profile submitted – the Carevaa team will review it. It will appear on the website once approved.'
+      : 'Profile saved';
+  res.status(isNew ? 201 : 200).json({ success: true, message, provider });
 });
 
 // POST /api/providers  (admin creates provider directly)
@@ -206,7 +207,11 @@ export const updateProvider = asyncHandler(async (req, res) => {
 
   Object.assign(provider, providerFields(req.body));
   if (req.user.role === 'admin' && req.body.status) provider.status = req.body.status;
+  // a rejected professional who corrects their profile is sent back for review
+  const resubmitted = req.user.role !== 'admin' && provider.status === 'REJECTED';
+  if (resubmitted) provider.status = 'PENDING';
   await provider.save();
+  if (resubmitted) await notifyAdmins({ type: 'account', title: 'Professional re-submitted for approval', body: `${provider.name} updated their details after rejection. Review and approve or reject.`, link: `/admin/providers/${provider._id}` });
   res.json({ success: true, provider });
 });
 
@@ -236,6 +241,8 @@ export const updateProviderStatus = asyncHandler(async (req, res) => {
 export const deleteProvider = asyncHandler(async (req, res) => {
   const provider = await Provider.findById(req.params.id);
   if (!provider) throw new ApiError(404, 'Provider not found');
+  const upcoming = await Appointment.countDocuments({ provider: provider._id, status: { $in: ['Waiting', 'Confirmed'] } });
+  if (upcoming) throw new ApiError(409, `${provider.name} has ${upcoming} upcoming appointment${upcoming === 1 ? '' : 's'}. Cancel or move ${upcoming === 1 ? 'it' : 'them'} first, or use "Remove from website" to hide the profile instead.`);
   await Provider.deleteOne({ _id: provider._id });
   if (provider.user) await User.updateOne({ _id: provider.user }, { $unset: { provider: 1 } });
   res.json({ success: true, message: 'Provider deleted' });

@@ -45,13 +45,12 @@ export const createReview = asyncHandler(async (req, res) => {
 
 // GET /api/reviews?providerId=&limit=   (public)
 export const listReviews = asyncHandler(async (req, res) => {
-  const filter = {};
-  if (req.query.providerId) filter.provider = req.query.providerId;
-  if (req.query.spec) {
-    const specs = String(req.query.spec).split(',').map((x) => x.trim()).filter(Boolean);
-    const ids = await Provider.find({ spec: { $in: specs } }).select('_id').lean();
-    filter.provider = { $in: ids.map((p) => p._id) };
-  }
+  // only reviews of approved (ACTIVE) professionals are public
+  const active = { status: 'ACTIVE' };
+  if (req.query.spec) active.spec = { $in: String(req.query.spec).split(',').map((x) => x.trim()).filter(Boolean) };
+  let ids = (await Provider.find(active).select('_id').lean()).map((p) => String(p._id));
+  if (req.query.providerId) ids = ids.filter((id) => id === String(req.query.providerId));
+  const filter = { provider: { $in: ids } };
   const limit = Math.min(Number(req.query.limit) || 50, 200);
   const reviews = await Review.find(filter).sort({ createdAt: -1 }).limit(limit).populate('provider', 'name spec city');
   const all = await Review.find(filter).select('rating').lean();
