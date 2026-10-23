@@ -80,6 +80,8 @@ export const register = asyncHandler(async (req, res) => {
     }
     if (b.gender) extra.gender = String(b.gender).trim();
     if (b.city) extra.city = String(b.city).trim().slice(0, 80);
+    ['district', 'state'].forEach((k) => { if (b[k]) extra[k] = String(b[k]).trim().slice(0, 80); });
+    if (b.locality) extra.locality = String(b.locality).trim().slice(0, 120);
     if (b.pincode !== undefined && b.pincode !== '') {
       if (!/^[1-9]\d{5}$/.test(String(b.pincode).trim())) throw new ApiError(400, 'Please enter a valid 6-digit PIN code');
       extra.pincode = String(b.pincode).trim();
@@ -117,7 +119,7 @@ export const me = asyncHandler(async (req, res) => {
   res.json({ success: true, user: payload.user });
 });
 
-// PUT /api/auth/me  { name, age, gender, city, phone, email }
+// PUT /api/auth/me  { name, age, gender, city, pincode, district, state, locality, phone, email }
 export const updateMe = asyncHandler(async (req, res) => {
   const b = req.body;
   // validate what the person typed before saving anything
@@ -141,6 +143,10 @@ export const updateMe = asyncHandler(async (req, res) => {
   });
   allowed.forEach((k) => {
     if (b[k] !== undefined && b[k] !== '') req.user[k] = typeof b[k] === 'string' ? b[k].trim() : b[k];
+  });
+  // address parts from the PIN code lookup (can be cleared when the PIN changes)
+  ['district', 'state', 'locality'].forEach((k) => {
+    if (b[k] !== undefined) req.user[k] = String(b[k] || '').trim().slice(0, 120) || undefined;
   });
   if (b.password) {
     if (String(b.password).length < 6) throw new ApiError(400, 'Password must be at least 6 characters');

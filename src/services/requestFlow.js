@@ -33,12 +33,23 @@ const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 
 export const OPEN_STATUSES = ['New', 'Contacted'];
 
+// 'Bengaluru Urban' / 'Bangalore' -> 'bangalore', 'Chennai' -> 'chennai', 'Mumbai Suburban' -> 'mumbai', ...
+const PLACE_ALIASES = { bengaluru: 'bangalore', mysuru: 'mysore', gurugram: 'gurgaon', bombay: 'mumbai', madras: 'chennai', calcutta: 'kolkata', kolkatta: 'kolkata', trivandrum: 'thiruvananthapuram', cochin: 'kochi', ernakulam: 'kochi', pondicherry: 'puducherry', vizag: 'visakhapatnam', mangaluru: 'mangalore', 'new delhi': 'delhi', 'gautam buddha nagar': 'noida', 'rangareddy': 'hyderabad', 'k.v.rangareddy': 'hyderabad', 'medchal malkajgiri': 'hyderabad' };
+export function placeKey(v) {
+  let k = String(v || '').toLowerCase().replace(/[^a-z. ]/g, ' ').replace(/\b(urban|rural|suburban|city|district|dist)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/ delhi$/.test(k)) k = 'delhi';
+  return PLACE_ALIASES[k] || k;
+}
+
 // Does this professional fit the request? (service -> speciality, and the same city)
 export function providerMatches(enquiry, provider) {
   if (!provider || provider.status !== 'ACTIVE') return false;
   const specs = SERVICE_SPECS[enquiry.service];
   const serviceOk = specs ? specs.includes(provider.spec) : enquiry.service === 'Doctor Visit' ? provider.isDoctor : true;
-  const cityOk = !enquiry.city || enquiry.city === 'Other' || String(provider.city || '').toLowerCase() === String(enquiry.city).toLowerCase();
+  // the city now comes from the PIN code (India Post district), so also compare districts and common old/new names
+  const want = [enquiry.city, enquiry.district].map(placeKey).filter(Boolean);
+  const have = [provider.city, provider.district].map(placeKey).filter(Boolean);
+  const cityOk = !enquiry.city || enquiry.city === 'Other' || !want.length || want.some((w) => have.includes(w));
   return serviceOk && cityOk;
 }
 
@@ -113,7 +124,7 @@ export async function scheduleFromEnquiry(enquiry, provider, { date, time, consu
     consultationType: type,
     serviceType,
     title: TITLES[type],
-    location: type === 'home' && enquiry.city ? `Patient Home, ${enquiry.city}` : LOCATIONS[type],
+    location: type === 'home' && enquiry.city ? `Patient Home, ${[enquiry.locality, enquiry.city].filter(Boolean).join(', ')}${enquiry.pincode ? ` - ${enquiry.pincode}` : ''}` : LOCATIONS[type],
     fee,
     status,
     paymentStatus: 'Pending',

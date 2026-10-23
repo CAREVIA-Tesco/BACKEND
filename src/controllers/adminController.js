@@ -207,6 +207,7 @@ export const createPatient = asyncHandler(async (req, res) => {
   const user = await User.create({
     name, phone, email: email || undefined, password, role: 'patient',
     age, gender: req.body.gender || undefined, city: req.body.city || undefined, pincode: req.body.pincode || undefined,
+    district: req.body.district || undefined, state: req.body.state || undefined, locality: req.body.locality || undefined,
     conditions: toList(req.body.conditions),
   });
   await linkGuestRecords(user).catch(() => {}); // earlier bookings made with this number now show in the account
@@ -214,7 +215,8 @@ export const createPatient = asyncHandler(async (req, res) => {
 });
 
 export const updatePatient = asyncHandler(async (req, res) => {
-  const allowed = ['status', 'name', 'phone', 'email', 'age', 'gender', 'city', 'bloodGroup', 'emergencyContact'];
+  const allowed = ['status', 'name', 'phone', 'email', 'age', 'gender', 'city', 'pincode', 'district', 'state', 'locality', 'bloodGroup', 'emergencyContact'];
+  if (req.body.pincode && !/^[1-9]\d{5}$/.test(String(req.body.pincode))) throw new ApiError(400, 'Please enter a valid 6-digit PIN code');
   const update = Object.fromEntries(allowed.filter((k) => req.body[k] !== undefined).map((k) => [k, req.body[k]]));
   const toList = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((x) => String(x).trim()).filter(Boolean);
   if (req.body.allergies !== undefined) update.allergies = toList(req.body.allergies);

@@ -12,6 +12,9 @@ const userSchema = new mongoose.Schema(
     gender: String,
     city: String,
     pincode: String,
+    district: String,
+    state: String,
+    locality: String,
     careFor: { type: String, enum: ['Myself', 'Parent', 'Spouse', 'Child', 'Other', null], default: null }, // who the patient account books care for
     bloodGroup: String,
     allergies: [String],
@@ -24,6 +27,9 @@ const userSchema = new mongoose.Schema(
     status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
     provider: { type: mongoose.Schema.Types.ObjectId, ref: 'Provider' },
     lastLoginAt: Date,
+    // forgot password by SMS OTP (only used when Twilio Verify is not configured)
+    resetOtp: { type: new mongoose.Schema({ hash: String, expiresAt: Date, attempts: Number }, { _id: false }), select: false, default: undefined },
+    resetOtpSentAt: { type: [Date], select: false, default: undefined }, // recent sends, for rate limits
   },
   { timestamps: true }
 );
@@ -45,6 +51,8 @@ userSchema.set('toJSON', {
     delete ret._id;
     delete ret.__v;
     delete ret.password;
+    delete ret.resetOtp;
+    delete ret.resetOtpSentAt;
     return ret;
   },
 });

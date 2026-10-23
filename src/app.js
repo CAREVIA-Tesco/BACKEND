@@ -4,6 +4,7 @@ import routes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 
 const app = express();
+app.set('trust proxy', 1); // behind Render's proxy: use the visitor's IP for rate limits
 
 // the live website is always allowed; add more origins (comma separated) in CLIENT_URL
 const allowed = [...new Set([

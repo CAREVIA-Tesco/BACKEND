@@ -11,6 +11,8 @@ import * as content from '../controllers/contentController.js';
 import * as emergency from '../controllers/emergencyController.js';
 import * as publicApi from '../controllers/publicController.js';
 import * as enquiries from '../controllers/enquiryController.js';
+import * as pincode from '../controllers/pincodeController.js';
+import * as passwordReset from '../controllers/passwordResetController.js';
 
 const router = Router();
 const adminOnly = [protect, authorize('admin')];
@@ -20,11 +22,18 @@ router.get('/health', (_req, res) => res.json({ success: true, status: 'ok', tim
 // Public numbers for the marketing pages
 router.get('/public/stats', publicApi.publicStats);
 
+// PIN code -> city, district, state and post offices (any PIN code in India)
+router.get('/pincode/:pin', pincode.lookupPincode);
+
 // Auth
 router.post('/auth/register', auth.register);
 router.post('/auth/login', auth.login);
 router.get('/auth/me', protect, auth.me);
 router.put('/auth/me', protect, auth.updateMe);
+// Forgot password: SMS OTP through Twilio (patients and professionals only)
+router.post('/auth/forgot-password', passwordReset.forgotPassword);
+router.post('/auth/verify-otp', passwordReset.verifyOtp);
+router.post('/auth/reset-password', passwordReset.resetPassword);
 
 // Providers (doctors & care professionals)
 router.get('/providers', optionalAuth, providers.listProviders);

@@ -14,6 +14,7 @@ async function userFromRequest(req) {
   if (!token) return null;
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.purpose) return null; // special-purpose tokens (e.g. password reset) are not logins
     return await User.findById(decoded.id);
   } catch {
     return null;

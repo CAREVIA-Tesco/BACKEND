@@ -33,6 +33,9 @@ const enquirySchema = new mongoose.Schema(
     email: { type: String, trim: true, lowercase: true },
     city: { type: String, trim: true },
     pincode: { type: String, trim: true },
+    district: { type: String, trim: true },
+    state: { type: String, trim: true },
+    locality: { type: String, trim: true }, // post office / area picked from the PIN code lookup
     visitType: { type: String, enum: ['home', 'online', 'clinic', null], default: null }, // asked in Book Now
     service: { type: String, trim: true },
     plan: { type: String, trim: true },
@@ -88,6 +91,9 @@ const base = (ret) => ({
   email: ret.email,
   city: ret.city,
   pincode: ret.pincode,
+  district: ret.district,
+  state: ret.state,
+  locality: ret.locality,
   visitType: ret.visitType,
   visitTypeLabel: VISIT_LABEL[ret.visitType] || '',
   service: ret.service,

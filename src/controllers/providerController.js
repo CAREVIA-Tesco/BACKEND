@@ -39,7 +39,7 @@ function providerFields(body) {
     if (v !== undefined) f[k] = v;
   });
   if (num(body.homeFee) !== undefined) f.fee = num(body.homeFee);
-  ['city', 'state', 'email', 'phone', 'qualification', 'registrationNumber', 'registrationCouncil', 'gender'].forEach((k) => {
+  ['city', 'state', 'district', 'locality', 'email', 'phone', 'qualification', 'registrationNumber', 'registrationCouncil', 'gender'].forEach((k) => {
     if (body[k] !== undefined) f[k] = typeof body[k] === 'string' ? body[k].trim() : body[k];
   });
   if (body.gender === '') f.gender = null;

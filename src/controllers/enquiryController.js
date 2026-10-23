@@ -28,7 +28,7 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     if (digits(b.referrerPhone) === digits(phone)) throw new ApiError(400, "Your friend's number must be different from yours");
   }
   if (type === 'booking') {
-    if (!clean(b.city, 80)) throw new ApiError(400, 'Please select the city where you need the service');
+    if (!clean(b.city, 80)) throw new ApiError(400, 'Please enter the city where you need the service');
     if (!/^[1-9]\d{5}$/.test(String(b.pincode || '').trim())) throw new ApiError(400, 'Please enter a valid 6-digit PIN code');
     if (!b.preferredDate) throw new ApiError(400, 'Please choose a date');
     if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(String(b.preferredTime || ''))) throw new ApiError(400, 'Please choose a time');
@@ -72,6 +72,9 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     email,
     city: clean(b.city, 80),
     pincode: /^[1-9]\d{5}$/.test(String(b.pincode || '').trim()) ? String(b.pincode).trim() : undefined,
+    district: clean(b.district, 80),
+    state: clean(b.state, 80),
+    locality: clean(b.locality, 120),
     visitType: ['home', 'online', 'clinic'].includes(b.visitType) ? b.visitType : undefined,
     service: clean(b.service, 120),
     plan: clean(b.plan, 120),
@@ -143,7 +146,7 @@ export const listEnquiries = asyncHandler(async (req, res) => {
   let list = await Enquiry.find(filter).sort({ createdAt: -1 }).limit(1000);
   if (req.query.q) {
     const q = String(req.query.q).toLowerCase();
-    list = list.filter((e) => [e.code, e.name, e.phone, e.email, e.city, e.service, e.organisation, e.referrer?.name, e.referrer?.phone].join(' ').toLowerCase().includes(q));
+    list = list.filter((e) => [e.code, e.name, e.phone, e.email, e.city, e.pincode, e.district, e.locality, e.service, e.organisation, e.referrer?.name, e.referrer?.phone].join(' ').toLowerCase().includes(q));
   }
   const all = await Enquiry.find().select('status type createdAt').lean();
   const counts = Object.fromEntries(ENQUIRY_STATUSES.map((s) => [s, all.filter((e) => e.status === s).length]));
@@ -220,6 +223,8 @@ const openView = (e) => ({
   patient: firstName(e.name),
   city: e.city,
   pincode: e.pincode,
+  locality: e.locality,
+  district: e.district,
   visitType: e.visitType || 'home',
   service: e.service || 'General care',
   plan: e.plan,

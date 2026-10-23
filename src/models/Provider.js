@@ -23,6 +23,8 @@ const providerSchema = new mongoose.Schema(
     reviews: { type: Number, default: 0 },
     city: String,
     state: String,
+    district: String,
+    locality: String,
     email: String,
     phone: String,
     img: String,
