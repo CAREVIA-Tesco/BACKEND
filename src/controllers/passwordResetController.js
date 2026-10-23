@@ -21,9 +21,18 @@ const phone10 = (v) => String(v || '').replace(/\D/g, '').slice(-10);
 const validPhone = (p) => /^[6-9]\d{9}$/.test(p);
 
 async function findAccount(p) {
-  // phones are stored as typed (with or without +91), so match on the last 10 digits
-  const list = await User.find({ phone: { $regex: `${p}$` }, role: { $in: ['patient', 'doctor'] } }).select('+resetOtp +resetOtpSentAt +password');
-  return list.find((u) => phone10(u.phone) === p) || null;
+  // phones are stored as typed ("+91 98765 43210", "9876543210", ...), so match on the last 10 digits
+  const rx = `${p.split('').join('\\D*')}\\D*$`;
+  const fields = '+resetOtp +resetOtpSentAt +password';
+  const list = await User.find({ phone: { $regex: rx }, role: { $in: ['patient', 'doctor'] } }).select(fields);
+  const direct = list.find((u) => phone10(u.phone) === p);
+  if (direct) return direct;
+  // professionals who signed up with email: their mobile is on the professional profile
+  const providers = await Provider.find({ phone: { $regex: rx }, user: { $exists: true, $ne: null } }).select('phone user');
+  const match = providers.find((x) => phone10(x.phone) === p);
+  if (!match) return null;
+  const user = await User.findOne({ _id: match.user, role: 'doctor' }).select(fields);
+  return user;
 }
 
 // per-IP limit on top of the per-number limits
@@ -49,7 +58,10 @@ export const forgotPassword = asyncHandler(async (req, res) => {
   if (ipLimited(req.ip)) throw new ApiError(429, 'Too many requests. Please try again after some time.');
 
   const user = await findAccount(p);
-  if (!user || user.status === 'Inactive') return res.json({ success: true, message: GENERIC, resendIn: RESEND_SECONDS });
+  if (!user || user.status === 'Inactive') {
+    console.log(`[sms] forgot password: no active patient/doctor account for ****${p.slice(-4)} – no OTP sent`);
+    return res.json({ success: true, message: GENERIC, resendIn: RESEND_SECONDS });
+  }
 
   const now = Date.now();
   const recent = (user.resetOtpSentAt || []).filter((t) => now - new Date(t).getTime() < 60 * 60 * 1000);
@@ -70,6 +82,7 @@ export const forgotPassword = asyncHandler(async (req, res) => {
     console.warn(`[sms] OTP send failed for ****${p.slice(-4)}: ${e.message}${e.code ? ` (Twilio ${e.code})` : ''}`);
     throw new ApiError(502, 'We could not send the OTP right now. Please try again in a minute.');
   }
+  console.log(`[sms] forgot password: OTP sent to ****${p.slice(-4)} (${usesVerify() ? 'Twilio Verify' : 'SMS'})`);
   user.resetOtpSentAt = [...recent, new Date(now)];
   await user.save({ validateModifiedOnly: true });
   res.json({ success: true, message: GENERIC, resendIn: RESEND_SECONDS });
