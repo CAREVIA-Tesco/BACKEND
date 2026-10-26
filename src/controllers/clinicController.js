@@ -1,11 +1,10 @@
 import { ClinicPatient, ClinicVisit } from '../models/ClinicRecord.js';
 import Provider from '../models/Provider.js';
-import User from '../models/User.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
 
 // Patient Visit Management (walk-in clinic visits).
-//  - doctor: their own patients and visits
-//  - nurse:  enters and updates visits for the doctor they work for (user.staffOf)
+//  - doctor: their own patients and visits. A nurse works on the doctor's dashboard and adds her
+//            name to each visit she enters ("Entered by"), so the admin can see who recorded it.
 //  - admin:  everything, plus doctor-wise reports (see the /admin/clinic/* handlers)
 
 const TZ = '+05:30';
@@ -24,11 +23,6 @@ async function clinicProvider(req, { forWrite = false } = {}) {
   if (u.role === 'doctor') {
     const p = await Provider.findOne({ user: u._id });
     if (!p) throw new ApiError(403, 'Complete your professional profile first');
-    return p;
-  }
-  if (u.role === 'nurse') {
-    const p = u.staffOf ? await Provider.findById(u.staffOf) : null;
-    if (!p) throw new ApiError(403, 'Your account is not linked to a doctor. Please contact the clinic.');
     return p;
   }
   if (u.role === 'admin') {
@@ -56,6 +50,7 @@ function visitFields(b) {
   const f = {};
   ['symptoms', 'diagnosis', 'treatment', 'nurseNotes'].forEach((k) => { if (b[k] !== undefined) f[k] = clean(b[k]); });
   if (b.prescription !== undefined) f.prescription = clean(b.prescription, 3000);
+  if (b.recordedBy !== undefined) f.recordedBy = clean(b.recordedBy, 80);
   if (b.visitDate !== undefined) {
     const d = /^\d{4}-\d{2}-\d{2}$/.test(String(b.visitDate)) ? new Date(`${b.visitDate}T${isoDay(new Date()) === b.visitDate ? new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(11, 19) : '10:00:00'}${TZ}`) : new Date(b.visitDate);
     if (Number.isNaN(d.getTime())) throw new ApiError(400, 'Please enter a valid visit date');
@@ -244,7 +239,6 @@ export const updateVisit = asyncHandler(async (req, res) => {
 
 // DELETE /api/clinic/visits/:id  (doctor or admin – e.g. entered for the wrong patient)
 export const deleteVisit = asyncHandler(async (req, res) => {
-  if (req.user.role === 'nurse') throw new ApiError(403, 'Only the doctor can delete a visit');
   const visit = await loadVisit(req, req.params.id);
   await ClinicVisit.deleteOne({ _id: visit._id });
   await refreshPatientStats(visit.patient);
@@ -347,44 +341,3 @@ export const adminReport = asyncHandler(async (req, res) => {
   }
   res.json({ success: true, ...(await buildReport(req.query, providers)) });
 });
-
-// ---------------------------------------------------------------- clinic staff (nurses)
-
-// GET /api/clinic/staff   (doctor: own nurses; admin: ?providerId=)
-export const listStaff = asyncHandler(async (req, res) => {
-  if (req.user.role === 'nurse') throw new ApiError(403, 'Not allowed');
-  const provider = await clinicProvider(req, { forWrite: true });
-  const staff = await User.find({ role: 'nurse', staffOf: provider._id }).sort({ createdAt: -1 });
-  res.json({ success: true, staff: staff.map((u) => ({ id: u._id.toString(), name: u.name, phone: u.phone, email: u.email, status: u.status, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt })) });
-});
-
-// POST /api/clinic/staff  { name, phone, email?, password }
-export const addStaff = asyncHandler(async (req, res) => {
-  if (req.user.role === 'nurse') throw new ApiError(403, 'Not allowed');
-  const provider = await clinicProvider(req, { forWrite: true });
-  const b = req.body || {};
-  const name = clean(b.name, 80);
-  const phone = digits(b.phone);
-  const email = clean(b.email, 120).toLowerCase();
-  if (!name) throw new ApiError(400, "Please enter the nurse's name");
-  if (!/^[6-9]\d{9}$/.test(phone)) throw new ApiError(400, 'Please enter a valid 10-digit mobile number');
-  if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new ApiError(400, 'Please enter a valid email address');
-  if (String(b.password || '').length < 6) throw new ApiError(400, 'Password must be at least 6 characters');
-  if (await User.findOne({ phone: { $regex: `${phone}$` } })) throw new ApiError(409, 'An account with this mobile number already exists');
-  if (email && (await User.findOne({ email }))) throw new ApiError(409, 'An account with this email already exists');
-  const u = await User.create({ name, phone, email: email || undefined, password: String(b.password), role: 'nurse', staffOf: provider._id });
-  res.status(201).json({ success: true, message: `${name} can now sign in with ${phone} on the Doctor tab of the login page`, staff: { id: u._id.toString(), name, phone, email: u.email, status: u.status } });
-});
-
-// PATCH /api/clinic/staff/:id  { status: 'Active' | 'Inactive' }
-export const updateStaff = asyncHandler(async (req, res) => {
-  if (req.user.role === 'nurse') throw new ApiError(403, 'Not allowed');
-  const provider = await clinicProvider(req, { forWrite: true });
-  const u = await User.findOne({ _id: req.params.id, role: 'nurse', staffOf: provider._id }).catch(() => null);
-  if (!u) throw new ApiError(404, 'Staff member not found');
-  if (!['Active', 'Inactive'].includes(req.body?.status)) throw new ApiError(400, 'Invalid status');
-  u.status = req.body.status;
-  await u.save();
-  res.json({ success: true, message: u.status === 'Active' ? `${u.name} can sign in again` : `${u.name} can no longer sign in`, staff: { id: u._id.toString(), name: u.name, phone: u.phone, status: u.status } });
-});
-

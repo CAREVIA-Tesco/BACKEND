@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { offersOf, modesOf } from '../utils/slots.js';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -31,12 +32,20 @@ const providerSchema = new mongoose.Schema(
     fee: Number, // home / visit fee (care professionals)
     clinicFee: Number,
     onlineFee: Number,
+    // which consultations the doctor offers – shown on the website and used by booking
+    consultTypes: {
+      home: Boolean,
+      clinic: Boolean,
+      online: Boolean,
+    },
     clinic: {
       name: String,
       address: String,
       phone: String,
       website: String,
     },
+    // timings per consultation type: { clinic: { days: ['Mon'], sessions: [{ from: '10:00', to: '13:00' }], slotMins: 30 }, online: {...}, home: {...} }
+    hours: { type: Object, default: undefined },
     bank: {
       holderName: String,
       bankName: String,
@@ -65,6 +74,8 @@ providerSchema.set('toJSON', {
     ret.rating = ret.reviews ? Number(ret.rating || 0).toFixed(1) : 'New'; // no reviews yet -> no rating
     if (ret.bank) delete ret.bank.accountNumber;
     if (ret.user) ret.user = ret.user.toString();
+    ret.offers = offersOf(ret);
+    ret.modes = modesOf(ret);
     delete ret._id;
     delete ret.__v;
     return ret;

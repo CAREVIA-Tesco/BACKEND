@@ -6,6 +6,7 @@ import { ApiError, asyncHandler } from '../middleware/error.js';
 import { feeFor } from '../utils/format.js';
 import { syncEnquiryFromAppointment } from '../services/requestFlow.js';
 import { notifyAppointment } from '../services/notify.js';
+import { slotToMin, minTo12, istDay, atIST } from '../utils/slots.js';
 
 const TITLES = { online: 'Online Consultation', clinic: 'Clinic Consultation', home: 'Home Consultation' };
 const LOCATIONS = { online: 'Virtual', clinic: 'Main Clinic', home: 'Patient Home' };
@@ -18,17 +19,14 @@ function forViewer(appt, user) {
   return j;
 }
 
-// "09:00 AM" + date -> Date with that time (local server time)
+// "09:00 AM" + date -> that time in India (the server may run in UTC)
 function combine(dateInput, timeSlot) {
   const d = new Date(dateInput);
   if (Number.isNaN(d.getTime())) throw new ApiError(400, 'Invalid appointment date');
-  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(timeSlot || '').trim());
-  if (m) {
-    let h = parseInt(m[1], 10) % 12;
-    if (m[3].toUpperCase() === 'PM') h += 12;
-    d.setHours(h, parseInt(m[2], 10), 0, 0);
-  }
-  return d;
+  const min = slotToMin(timeSlot);
+  if (min === null) return d;
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(dateInput)) ? String(dateInput) : istDay(d);
+  return atIST(day, minTo12(min));
 }
 
 // "Thu, May 22" (reschedule picker) or ISO string -> Date
@@ -164,7 +162,10 @@ export const rescheduleAppointment = asyncHandler(async (req, res) => {
   if (!date || !time) throw new ApiError(400, 'New date and time are required');
   const base = parseLooseDate(date);
   if (!base) throw new ApiError(400, 'Invalid date');
-  appt.scheduledAt = combine(base, time);
+  const newAt = combine(base, time);
+  const clash = await Appointment.findOne({ _id: { $ne: appt._id }, provider: appt.provider?._id || appt.provider, scheduledAt: newAt, status: { $in: ACTIVE } });
+  if (clash) throw new ApiError(409, 'That time is already booked for this professional. Please choose another slot.');
+  appt.scheduledAt = newAt;
   appt.timeSlot = time;
   appt.rescheduled = true;
   appt.status = 'Confirmed';

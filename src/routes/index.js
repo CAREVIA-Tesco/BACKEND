@@ -34,8 +34,8 @@ router.post('/auth/login', auth.login);
 router.get('/auth/me', protect, auth.me);
 router.put('/auth/me', protect, auth.updateMe);
 
-// Patient Visit Management (walk-in clinic visits): doctor + their nurses, admin sees all
-const clinicTeam = [protect, authorize('doctor', 'nurse', 'admin')];
+// Patient Visit Management (walk-in clinic visits): the doctor's dashboard (doctor or their nurse), admin sees all
+const clinicTeam = [protect, authorize('doctor', 'admin')];
 router.get('/clinic/summary', ...clinicTeam, clinic.summary);
 router.get('/clinic/report', ...clinicTeam, clinic.report);
 router.get('/clinic/patients', ...clinicTeam, clinic.listPatients);
@@ -46,9 +46,6 @@ router.get('/clinic/visits', ...clinicTeam, clinic.listVisits);
 router.post('/clinic/visits', ...clinicTeam, clinic.createVisit);
 router.put('/clinic/visits/:id', ...clinicTeam, clinic.updateVisit);
 router.delete('/clinic/visits/:id', ...clinicTeam, clinic.deleteVisit);
-router.get('/clinic/staff', ...clinicTeam, clinic.listStaff);
-router.post('/clinic/staff', ...clinicTeam, clinic.addStaff);
-router.patch('/clinic/staff/:id', ...clinicTeam, clinic.updateStaff);
 router.get('/admin/clinic/report', protect, authorize('admin'), clinic.adminReport);
 
 // Notifications (bell icon in every dashboard)
@@ -66,6 +63,7 @@ router.get('/providers', optionalAuth, providers.listProviders);
 router.get('/providers/me', protect, authorize('doctor'), providers.myProvider);
 router.post('/providers/onboarding', protect, authorize('doctor'), providers.submitOnboarding);
 router.post('/providers', ...adminOnly, providers.createProvider);
+router.get('/providers/:id/slots', optionalAuth, providers.providerSlots);
 router.get('/providers/:id', optionalAuth, providers.getProvider);
 router.put('/providers/:id', protect, authorize('admin', 'doctor'), providers.updateProvider);
 router.patch('/providers/:id/status', ...adminOnly, providers.updateProviderStatus);

@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, trim: true, sparse: true, unique: true },
     password: { type: String, required: true, minlength: 6, select: false },
     role: { type: String, enum: ['patient', 'doctor', 'admin', 'nurse'], default: 'patient' },
-    staffOf: { type: mongoose.Schema.Types.ObjectId, ref: 'Provider' }, // nurse / clinic staff: the doctor they work for
+    staffOf: { type: mongoose.Schema.Types.ObjectId, ref: 'Provider' }, // old nurse accounts (no longer used – nurses work on the doctor's dashboard)
     age: Number,
     gender: String,
     city: String,

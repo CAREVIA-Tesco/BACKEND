@@ -36,6 +36,7 @@ const enquirySchema = new mongoose.Schema(
     district: { type: String, trim: true },
     state: { type: String, trim: true },
     locality: { type: String, trim: true }, // post office / area picked from the PIN code lookup
+    address: { type: String, trim: true }, // house / street for home visits
     visitType: { type: String, enum: ['home', 'online', 'clinic', null], default: null }, // asked in Book Now
     service: { type: String, trim: true },
     // a specific doctor the patient asked for ("Book" on a doctor's card) – the care team arranges it
@@ -71,8 +72,12 @@ enquirySchema.index({ phone: 1, createdAt: -1 });
 
 enquirySchema.pre('save', async function assignCode(next) {
   if (this.code) return next();
-  const count = await this.constructor.countDocuments();
-  this.code = `ENQ-${50101 + count}`;
+  // next number after the newest code (requests can be deleted, so the count alone could repeat a code)
+  const [count, last] = await Promise.all([
+    this.constructor.countDocuments(),
+    this.constructor.findOne({ code: /^ENQ-\d+$/ }).sort({ createdAt: -1, _id: -1 }).select('code'),
+  ]);
+  this.code = `ENQ-${Math.max(50101 + count, last ? parseInt(last.code.slice(4), 10) + 1 : 0)}`;
   next();
 });
 
@@ -98,6 +103,7 @@ const base = (ret) => ({
   district: ret.district,
   state: ret.state,
   locality: ret.locality,
+  address: ret.address,
   visitType: ret.visitType,
   visitTypeLabel: VISIT_LABEL[ret.visitType] || '',
   service: ret.service,

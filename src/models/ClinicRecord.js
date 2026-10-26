@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 // Walk-in clinic patients and their visits, entered by the doctor or the doctor's nurse
-// (Doctor Dashboard → Patient Visits). One patient record per doctor per (mobile + name),
+// (Doctor Dashboard → Patient Visits; a nurse uses the doctor's dashboard and adds her name). One patient record per doctor per (mobile + name),
 // so the same person is never saved twice; every visit is a separate record linked to it.
 const actor = { user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, name: String, role: String };
 
@@ -61,6 +61,7 @@ const clinicVisitSchema = new mongoose.Schema(
     treatment: { type: String, maxlength: 2000 },
     prescription: { type: String, maxlength: 3000 },
     nurseNotes: { type: String, maxlength: 2000 },
+    recordedBy: { type: String, trim: true, maxlength: 80 }, // nurse who typed it in on the doctor's dashboard
     enteredBy: actor,
     updatedBy: { ...actor, at: Date },
   },
@@ -83,7 +84,8 @@ clinicVisitSchema.set('toJSON', {
     treatment: ret.treatment || '',
     prescription: ret.prescription || '',
     nurseNotes: ret.nurseNotes || '',
-    enteredBy: ret.enteredBy?.name ? `${ret.enteredBy.name}${ret.enteredBy.role === 'nurse' ? ' (nurse)' : ''}` : '',
+    recordedBy: ret.recordedBy || '',
+    enteredBy: ret.recordedBy ? `${ret.recordedBy} (nurse)` : ret.enteredBy?.name ? `${ret.enteredBy.name}${ret.enteredBy.role === 'nurse' ? ' (nurse)' : ''}` : '',
     updatedBy: ret.updatedBy?.name ? `${ret.updatedBy.name}${ret.updatedBy.role === 'nurse' ? ' (nurse)' : ''}` : '',
     updatedAt: ret.updatedBy?.at || ret.updatedAt,
     createdAt: ret.createdAt,

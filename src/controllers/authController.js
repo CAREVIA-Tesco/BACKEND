@@ -36,10 +36,6 @@ export async function linkGuestRecords(user) {
 async function sessionPayload(user) {
   let provider = null;
   if (user.role === 'doctor') provider = await Provider.findOne({ user: user._id });
-  if (user.role === 'nurse') {
-    const doc = user.staffOf ? await Provider.findById(user.staffOf).select('name spec') : null;
-    return { success: true, token: signToken(user), user: { ...user.toJSON(), clinicDoctor: doc ? { id: doc._id.toString(), name: doc.name, spec: doc.spec } : null } };
-  }
   return {
     success: true,
     token: signToken(user),
@@ -106,8 +102,8 @@ export const login = asyncHandler(async (req, res) => {
 
   const user = await User.findOne(identifierQuery(identifier)).select('+password');
   if (!user || !(await user.matchPassword(password))) throw new ApiError(401, 'Invalid email/phone or password');
-  // nurses (clinic staff) sign in on the Doctor tab
-  if (role && user.role !== role && !(role === 'doctor' && user.role === 'nurse')) {
+  if (user.role === 'nurse') throw new ApiError(403, "Nurses enter patient details from the doctor's dashboard – please sign in with the doctor's account.");
+  if (role && user.role !== role) {
     throw new ApiError(403, `This account is registered as ${user.role === 'admin' ? 'an admin' : `a ${user.role}`}. Please choose the "${user.role.charAt(0).toUpperCase() + user.role.slice(1)}" tab.`);
   }
   if (user.status === 'Inactive') throw new ApiError(403, 'Your account is inactive. Contact support.');

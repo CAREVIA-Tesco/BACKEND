@@ -125,7 +125,9 @@ export async function scheduleFromEnquiry(enquiry, provider, { date, time, consu
     consultationType: type,
     serviceType,
     title: TITLES[type],
-    location: type === 'home' && enquiry.city ? `Patient Home, ${[enquiry.locality, enquiry.city].filter(Boolean).join(', ')}${enquiry.pincode ? ` - ${enquiry.pincode}` : ''}` : LOCATIONS[type],
+    location: type === 'home' && (enquiry.city || enquiry.address) ? `Patient Home, ${[enquiry.address, enquiry.locality, enquiry.city].filter(Boolean).join(', ')}${enquiry.pincode ? ` - ${enquiry.pincode}` : ''}`
+      : type === 'clinic' && provider.clinic?.name ? [provider.clinic.name, provider.clinic.address].filter(Boolean).join(', ')
+        : LOCATIONS[type],
     fee,
     status,
     paymentStatus: 'Pending',
@@ -158,9 +160,9 @@ export async function scheduleFromEnquiry(enquiry, provider, { date, time, consu
       ? `${provider.name} (${provider.spec}) accepted your request – visit on ${whenText(appointment)}. Appointment ID: ${appointment.code}.`
       : `Visit scheduled with ${provider.name} (${provider.spec}) on ${whenText(appointment)} – waiting for the professional to confirm. Appointment ID: ${appointment.code}.`,
   });
-  enquiry.notes.push({ text: `${assignedBy === 'admin' ? 'Assigned to' : 'Accepted by'} ${provider.name} – ${appointment.code}`, by });
+  enquiry.notes.push({ text: `${assignedBy === 'admin' ? 'Assigned to' : assignedBy === 'patient' ? 'Patient booked a free slot with' : 'Accepted by'} ${provider.name} – ${appointment.code}`, by });
   await enquiry.save();
-  await notifyAppointment(appointment, 'Booked', assignedBy === 'admin' ? 'admin' : 'doctor');
+  await notifyAppointment(appointment, 'Booked', assignedBy === 'admin' ? 'admin' : assignedBy === 'patient' ? 'patient' : 'doctor');
   return appointment;
 }
 
@@ -192,10 +194,11 @@ export async function syncEnquiryFromAppointment(appt, event, actorRole) {
       enquiry.provider = undefined;
       enquiry.providerName = undefined;
       if (actorRole === 'doctor') enquiry.declinedBy.push(appt.provider?._id || appt.provider);
-      enquiry.broadcast = true;
-      enquiry.broadcastAt = new Date();
+      // a request for one particular doctor goes back to the care team only
+      enquiry.broadcast = !enquiry.requestedProvider;
+      if (enquiry.broadcast) enquiry.broadcastAt = new Date();
       enquiry.timeline.push({ status: 'Contacted', note: `${who} is not available at that time – we are arranging another professional for you.` });
-      enquiry.notes.push({ text: `${who} declined/cancelled ${appt.code}. Request shared with other matching professionals again.`, by: actorRole === 'doctor' ? who : 'Admin' });
+      enquiry.notes.push({ text: `${who} declined/cancelled ${appt.code}. ${enquiry.broadcast ? 'Request shared with other matching professionals again.' : 'Please call the patient to arrange another time.'}`, by: actorRole === 'doctor' ? who : 'Admin' });
     }
   }
   await enquiry.save();

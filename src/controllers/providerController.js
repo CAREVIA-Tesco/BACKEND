@@ -4,6 +4,8 @@ import User from '../models/User.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
 import { specFor, DOCTOR_PROFESSIONS } from '../utils/format.js';
 import { notifyAdmins, notifyProvider, LINKS } from '../services/notify.js';
+import { TYPES, cleanHours, offersOf, scheduleUnion, hasHours, hoursText } from '../utils/slots.js';
+import { slotCalendar } from '../services/slotBooking.js';
 
 // Professionals who register on the website start as PENDING and only appear on the site
 // (listings, search, profile page, booking) after an admin approves them (status ACTIVE).
@@ -72,7 +74,33 @@ function providerFields(body) {
   if (body.schedule && typeof body.schedule === 'object') {
     f.schedule = Object.fromEntries(DAYS.map((d) => [d, Array.isArray(body.schedule[d]) ? body.schedule[d] : []]));
   }
+  if (body.consultTypes && typeof body.consultTypes === 'object') {
+    f.consultTypes = Object.fromEntries(TYPES.map((t) => [t, Boolean(body.consultTypes[t])]));
+  }
+  if (body.hours !== undefined) f.hours = cleanHours(body.hours);
   return f;
+}
+
+// consultation types + timings: check them and keep the weekly `schedule` (used by admin views) in step
+function applyConsultation(provider, body) {
+  if (body.consultTypes && typeof body.consultTypes === 'object') {
+    const offers = offersOf(provider);
+    if (!TYPES.some((t) => offers[t])) throw new ApiError(400, 'Please choose at least one type of consultation you offer (home visit, clinic visit or online).');
+    if (offers.clinic && (!String(provider.clinic?.name || '').trim() || !String(provider.clinic?.address || '').trim())) {
+      throw new ApiError(400, 'You offer clinic visits – please enter your clinic name and address.');
+    }
+    for (const t of TYPES) {
+      const h = provider.hours?.[t];
+      if (offers[t] && h && h.days?.length && !(h.sessions || []).some((s) => s.to > s.from)) {
+        throw new ApiError(400, `Please check the ${t === 'clinic' ? 'clinic' : t === 'online' ? 'online consultation' : 'home visit'} timings – the end time must be after the start time.`);
+      }
+    }
+  }
+  if (body.hours !== undefined || body.consultTypes) {
+    provider.markModified('hours');
+    const union = scheduleUnion(provider);
+    if (union) provider.schedule = union;
+  }
 }
 
 // GET /api/providers  (public: only ACTIVE providers; admin may pass ?status=ALL)
@@ -83,6 +111,10 @@ const publicProvider = (p) => {
   delete j.phone;
   delete j.email;
   delete j.user;
+  // fees only for the consultation types the professional offers
+  if (!j.offers?.home) delete j.fee;
+  if (!j.offers?.clinic) { delete j.clinicFee; delete j.clinic; }
+  if (!j.offers?.online) delete j.onlineFee;
   return j;
 };
 
@@ -174,6 +206,7 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
     });
   }
   if (!provider.img) provider.img = avatarFor(provider.name);
+  applyConsultation(provider, req.body);
   await provider.save();
 
   if (isNew || resubmitted) {
@@ -206,6 +239,7 @@ export const updateProvider = asyncHandler(async (req, res) => {
   if (req.user.role !== 'admin' && !isOwner) throw new ApiError(403, 'Not allowed');
 
   Object.assign(provider, providerFields(req.body));
+  applyConsultation(provider, req.body);
   if (req.user.role === 'admin' && req.body.status) provider.status = req.body.status;
   // a rejected professional who corrects their profile is sent back for review
   const resubmitted = req.user.role !== 'admin' && provider.status === 'REJECTED';
@@ -246,4 +280,28 @@ export const deleteProvider = asyncHandler(async (req, res) => {
   await Provider.deleteOne({ _id: provider._id });
   if (provider.user) await User.updateOne({ _id: provider.user }, { $unset: { provider: 1 } });
   res.json({ success: true, message: 'Provider deleted' });
+});
+
+// GET /api/providers/:id/slots?type=clinic&from=YYYY-MM-DD&days=14  (public)
+// The consultation types the doctor offers, and the free / booked slots for the chosen type.
+export const providerSlots = asyncHandler(async (req, res) => {
+  const provider = await Provider.findById(req.params.id).catch(() => null);
+  const isOwner = req.user && provider?.user?.equals(req.user._id);
+  if (!provider || (provider.status !== 'ACTIVE' && req.user?.role !== 'admin' && !isOwner)) throw new ApiError(404, 'This doctor is not available for booking right now');
+  const offers = offersOf(provider);
+  const type = TYPES.includes(req.query.type) && offers[req.query.type] ? req.query.type : TYPES.find((t) => offers[t]);
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 14, 1), 60);
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || '')) ? req.query.from : undefined;
+  const configured = hasHours(provider, type);
+  res.json({
+    success: true,
+    providerId: provider._id.toString(),
+    type,
+    offers,
+    modes: provider.toJSON().modes,
+    configured,
+    hours: hoursText(provider, type),
+    clinic: offers.clinic ? { name: provider.clinic?.name || '', address: provider.clinic?.address || '', phone: provider.clinic?.phone || '', website: provider.clinic?.website || '', city: provider.city || '' } : null,
+    days: configured ? await slotCalendar(provider, type, { from, days }) : [],
+  });
 });

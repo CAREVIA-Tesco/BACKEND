@@ -3,7 +3,10 @@ import Provider from '../models/Provider.js';
 import Appointment from '../models/Appointment.js';
 import { providerMatches, matchingProviders, scheduleFromEnquiry, OPEN_STATUSES } from '../services/requestFlow.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
-import { notifyAdmins, notifyUser, notifyUsers, LINKS } from '../services/notify.js';
+import { notifyAdmins, notifyUser, notifyUsers, notifyAppointment, LINKS } from '../services/notify.js';
+import { checkSlot } from '../services/slotBooking.js';
+import { offersOf } from '../utils/slots.js';
+import Payment from '../models/Payment.js';
 
 const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 const clean = (v, max = 200) => (v === undefined || v === null ? undefined : String(v).trim().slice(0, max) || undefined);
@@ -78,6 +81,22 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     }
   }
 
+  // "Book" on a doctor's card: the consultation type must be one the doctor offers, and when the doctor has
+  // published timings the chosen time must be one of their free slots (it is then booked straight away).
+  let requested = null;
+  let slotBooking = false;
+  if (b.providerId) {
+    requested = await Provider.findById(b.providerId).catch(() => null);
+    if (!requested || requested.status !== 'ACTIVE') throw new ApiError(404, 'This doctor is not available for booking right now. Please choose another doctor or call us.');
+  }
+  if (requested && type === 'booking') {
+    if (!b.visitType) { const o = offersOf(requested); b.visitType = ['home', 'clinic', 'online'].find((t) => o[t]); }
+    const check = await checkSlot(requested, b.visitType, preferredDate);
+    if (!check.ok) throw new ApiError(check.status, check.message);
+    slotBooking = !check.request;
+    if (b.visitType === 'home' && !clean(b.address, 300)) throw new ApiError(400, 'Please enter the house / flat and street address for the home visit');
+  }
+
   // avoid duplicate leads when the same number submits the same request twice in 10 minutes
   const recentList = await Enquiry.find({
     phone: { $regex: `${digits(phone)}$` },
@@ -87,18 +106,13 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     createdAt: { $gte: new Date(Date.now() - 10 * 60 * 1000) },
   });
   // a request for a different doctor is a new request, not a duplicate
-  const recent = recentList.find((e) => String(e.requestedProvider || '') === String(b.providerId || ''));
+  const recent = recentList.find((e) => String(e.requestedProvider || '') === String(b.providerId || '')
+    && (!requested || new Date(e.preferredDate).getTime() === new Date(preferredDate).getTime()));
   if (recent) {
     return res.status(200).json({ success: true, duplicate: true, message: `We already have your request ${recent.code}. Our care advisor will call you shortly.`, enquiry: recent.toPublic() });
   }
 
-  // "Book" on a doctor's card: the request names that doctor, and the care team arranges it
-  // (it is not shared with professionals, so the doctor never gets the booking straight from the website)
-  let requested = null;
-  if (b.providerId) {
-    requested = await Provider.findById(b.providerId).catch(() => null);
-    if (!requested || requested.status !== 'ACTIVE') throw new ApiError(404, 'This doctor is not available for booking right now. Please choose another doctor or call us.');
-  }
+  // a request naming a doctor is not shared with other professionals
 
   const enquiry = await Enquiry.create({
     type,
@@ -113,6 +127,7 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     district: clean(b.district, 80),
     state: clean(b.state, 80),
     locality: clean(b.locality, 120),
+    address: clean(b.address, 300),
     visitType: ['home', 'online', 'clinic'].includes(b.visitType) ? b.visitType : undefined,
     service: clean(b.service, 120),
     plan: clean(b.plan, 120),
@@ -129,7 +144,30 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     broadcastAt: type === 'booking' && !requested ? new Date() : undefined,
   });
 
-  await notifyNewEnquiry(enquiry);
+  // a free slot of the doctor was picked: book it now – the appointment shows on the doctor's dashboard
+  // (waiting for the doctor to confirm) and in the admin panel, and the slot is no longer offered to others
+  let appointment = null;
+  if (slotBooking) {
+    try {
+      appointment = await scheduleFromEnquiry(enquiry, requested, {
+        date: undefined, time: undefined, consultationType: b.visitType, status: 'Waiting', assignedBy: 'patient', by: enquiry.name,
+      });
+      // two patients submitting the same slot at the same moment: the first one keeps it
+      const same = await Appointment.find({ provider: requested._id, scheduledAt: appointment.scheduledAt, status: { $in: ['Waiting', 'Confirmed'] } }).sort({ createdAt: 1, _id: 1 });
+      if (same.length > 1 && String(same[0]._id) !== String(appointment._id)) {
+        await Payment.deleteMany({ appointment: appointment._id });
+        await Appointment.deleteOne({ _id: appointment._id });
+        await Enquiry.deleteOne({ _id: enquiry._id });
+        throw new ApiError(409, 'Sorry, this slot was just booked by another patient. Please choose another time.');
+      }
+    } catch (err) {
+      if (!appointment) await Enquiry.deleteOne({ _id: enquiry._id });
+      if (err.statusCode === 409 || err.status === 409) throw new ApiError(409, 'Sorry, this slot was just booked by another patient. Please choose another time.');
+      throw err;
+    }
+  } else {
+    await notifyNewEnquiry(enquiry);
+  }
 
   const messages = {
     booking: 'Thank you! Our care advisor will call you shortly to confirm your visit.',
@@ -139,8 +177,11 @@ export const createEnquiry = asyncHandler(async (req, res) => {
   };
   res.status(201).json({
     success: true,
-    message: messages[type] || 'Request received! A Carevaa care advisor will call you shortly.',
+    message: appointment
+      ? `Your slot with ${requested.name} is booked (${appointment.code}). The doctor will confirm it shortly.`
+      : messages[type] || 'Request received! A Carevaa care advisor will call you shortly.',
     enquiry: enquiry.toPublic(),
+    appointment: appointment ? { code: appointment.code, scheduledAt: appointment.scheduledAt, timeSlot: appointment.timeSlot, consultationType: appointment.consultationType, location: appointment.location } : undefined,
   });
 });
 
@@ -173,6 +214,17 @@ export const cancelEnquiry = asyncHandler(async (req, res) => {
   if (['Converted', 'Closed'].includes(enquiry.status)) throw new ApiError(400, `This request is already ${enquiry.status.toLowerCase()}`);
   enquiry.status = 'Closed';
   enquiry.closedReason = 'Cancelled by customer';
+  // a booked slot is released when the customer cancels the request
+  if (enquiry.appointment) {
+    const appt = await Appointment.findById(enquiry.appointment);
+    if (appt && ['Waiting', 'Confirmed'].includes(appt.status)) {
+      appt.status = 'Cancelled';
+      appt.cancelledBy = 'patient';
+      await appt.save();
+      await Payment.updateMany({ appointment: appt._id, status: 'Pending' }, { status: 'Failed' });
+      await notifyAppointment(appt, 'Cancelled', 'patient');
+    }
+  }
   notifyAdmins({ type: 'request', title: 'Request cancelled', body: `${enquiry.code}: ${enquiry.name} cancelled their ${enquiry.service || 'care'} request.`, link: `/admin/enquiries?q=${enquiry.code}` });
   enquiry.timeline.push({ status: 'Closed', note: 'You cancelled this request.' });
   await enquiry.save();
