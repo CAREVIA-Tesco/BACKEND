@@ -7,7 +7,8 @@ const userSchema = new mongoose.Schema(
     email: { type: String, trim: true, lowercase: true, sparse: true, unique: true },
     phone: { type: String, trim: true, sparse: true, unique: true },
     password: { type: String, required: true, minlength: 6, select: false },
-    role: { type: String, enum: ['patient', 'doctor', 'admin'], default: 'patient' },
+    role: { type: String, enum: ['patient', 'doctor', 'admin', 'nurse'], default: 'patient' },
+    staffOf: { type: mongoose.Schema.Types.ObjectId, ref: 'Provider' }, // nurse / clinic staff: the doctor they work for
     age: Number,
     gender: String,
     city: String,

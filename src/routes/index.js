@@ -14,6 +14,7 @@ import * as publicApi from '../controllers/publicController.js';
 import * as enquiries from '../controllers/enquiryController.js';
 import * as pincode from '../controllers/pincodeController.js';
 import * as notifications from '../controllers/notificationController.js';
+import * as clinic from '../controllers/clinicController.js';
 import * as passwordReset from '../controllers/passwordResetController.js';
 
 const router = Router();
@@ -32,6 +33,23 @@ router.post('/auth/register', auth.register);
 router.post('/auth/login', auth.login);
 router.get('/auth/me', protect, auth.me);
 router.put('/auth/me', protect, auth.updateMe);
+
+// Patient Visit Management (walk-in clinic visits): doctor + their nurses, admin sees all
+const clinicTeam = [protect, authorize('doctor', 'nurse', 'admin')];
+router.get('/clinic/summary', ...clinicTeam, clinic.summary);
+router.get('/clinic/report', ...clinicTeam, clinic.report);
+router.get('/clinic/patients', ...clinicTeam, clinic.listPatients);
+router.get('/clinic/patients/match', ...clinicTeam, clinic.matchPatients);
+router.get('/clinic/patients/:id', ...clinicTeam, clinic.getPatient);
+router.put('/clinic/patients/:id', ...clinicTeam, clinic.updatePatient);
+router.get('/clinic/visits', ...clinicTeam, clinic.listVisits);
+router.post('/clinic/visits', ...clinicTeam, clinic.createVisit);
+router.put('/clinic/visits/:id', ...clinicTeam, clinic.updateVisit);
+router.delete('/clinic/visits/:id', ...clinicTeam, clinic.deleteVisit);
+router.get('/clinic/staff', ...clinicTeam, clinic.listStaff);
+router.post('/clinic/staff', ...clinicTeam, clinic.addStaff);
+router.patch('/clinic/staff/:id', ...clinicTeam, clinic.updateStaff);
+router.get('/admin/clinic/report', protect, authorize('admin'), clinic.adminReport);
 
 // Notifications (bell icon in every dashboard)
 router.get('/notifications', protect, notifications.listNotifications);
