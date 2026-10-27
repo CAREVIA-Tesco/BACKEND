@@ -1,9 +1,10 @@
 import mongoose from 'mongoose';
+import { nextCode } from './Counter.js';
 import { dateLabel, shortDate, STATUS_COLORS } from '../utils/format.js';
 
 const appointmentSchema = new mongoose.Schema(
   {
-    code: { type: String, unique: true }, // APT-10284
+    code: { type: String, unique: true }, // APT-0001
     patientUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     patientName: { type: String, default: 'Guest Patient' },
     patientPhone: String,
@@ -41,8 +42,7 @@ const appointmentSchema = new mongoose.Schema(
 
 appointmentSchema.pre('save', async function assignCode(next) {
   if (this.code) return next();
-  const count = await this.constructor.countDocuments();
-  this.code = `APT-${10284 + count}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+  this.code = await nextCode('appointment', 'APT');
   next();
 });
 

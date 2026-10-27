@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextCode } from './Counter.js';
 import { offersOf, modesOf } from '../utils/slots.js';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -6,6 +7,7 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const providerSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    code: { type: String, unique: true, sparse: true }, // DOC-0001
     name: { type: String, required: true, trim: true },
     profession: { type: String, default: 'MBBS Doctor' }, // MBBS Doctor, Nurse, Caretaker, Lab Centre ...
     specialization: String, // sub-specialization chosen during onboarding
@@ -62,6 +64,11 @@ const providerSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+providerSchema.pre('save', async function assignCode(next) {
+  if (!this.code) this.code = await nextCode('provider', 'DOC');
+  next();
+});
 
 providerSchema.index({ name: 'text', spec: 'text', specialization: 'text' });
 

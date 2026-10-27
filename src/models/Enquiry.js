@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextCode } from './Counter.js';
 import { shortDate } from '../utils/format.js';
 
 // Leads from the public website: "Request a callback", care-plan enquiries,
@@ -72,12 +73,7 @@ enquirySchema.index({ phone: 1, createdAt: -1 });
 
 enquirySchema.pre('save', async function assignCode(next) {
   if (this.code) return next();
-  // next number after the newest code (requests can be deleted, so the count alone could repeat a code)
-  const [count, last] = await Promise.all([
-    this.constructor.countDocuments(),
-    this.constructor.findOne({ code: /^ENQ-\d+$/ }).sort({ createdAt: -1, _id: -1 }).select('code'),
-  ]);
-  this.code = `ENQ-${Math.max(50101 + count, last ? parseInt(last.code.slice(4), 10) + 1 : 0)}`;
+  this.code = await nextCode('enquiry', 'ENQ'); // ENQ-0001, ENQ-0002 …
   next();
 });
 
