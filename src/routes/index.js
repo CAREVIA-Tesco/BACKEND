@@ -30,6 +30,7 @@ router.get('/pincode/:pin', pincode.lookupPincode);
 
 // Auth
 router.post('/auth/register', auth.register);
+router.post('/auth/register-check', auth.registerCheck);
 router.post('/auth/login', auth.login);
 router.get('/auth/me', protect, auth.me);
 router.put('/auth/me', protect, auth.updateMe);

@@ -222,6 +222,37 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
   res.status(isNew ? 201 : 200).json({ success: true, message, provider });
 });
 
+// A doctor's account is only created together with their professional profile: the sign-up form sends the
+// whole onboarding form, it is checked here first, and only then are the account and the profile saved.
+export async function prepareNewProvider(body, account) {
+  const b = body || {};
+  if (!b.profession) throw new ApiError(400, 'Please select your profession');
+  if (!String(b.qualification || '').trim()) throw new ApiError(400, 'Please enter your highest qualification');
+  if (b.experience === undefined || b.experience === '' || Number(b.experience) < 0) throw new ApiError(400, 'Please enter your years of experience');
+  if (!String(b.city || '').trim()) throw new ApiError(400, 'Please enter the city where you work');
+  if (!/^[1-9]\d{5}$/.test(String(b.pincode || '').trim())) throw new ApiError(400, 'Please enter a valid 6-digit PIN code');
+  const bank = b.bank || {};
+  if (!String(bank.holderName || '').trim() || !String(bank.bankName || '').trim() || !String(bank.accountNumber || '').trim() || !String(bank.ifsc || '').trim()) {
+    throw new ApiError(400, 'Please fill in all bank details');
+  }
+  const fields = providerFields(b);
+  if (!fields.name) fields.name = account.name;
+  const provider = new Provider({
+    ...fields,
+    email: account.email,
+    phone: fields.phone || account.phone || fields.clinic?.phone,
+    status: 'PENDING', // waits for admin approval
+  });
+  if (!provider.img) provider.img = avatarFor(provider.name);
+  applyConsultation(provider, b);
+  await provider.validate();
+  return provider;
+}
+
+export async function announceNewProvider(provider) {
+  await notifyAdmins({ type: 'account', title: 'New professional waiting for approval', body: `${provider.name} (${provider.spec || provider.profession || 'professional'}${provider.city ? `, ${provider.city}` : ''}) registered. Review and approve or reject.`, link: `/admin/providers/${provider._id}` });
+}
+
 // POST /api/providers  (admin creates provider directly)
 export const createProvider = asyncHandler(async (req, res) => {
   const fields = providerFields(req.body);

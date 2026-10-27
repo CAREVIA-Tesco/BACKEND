@@ -5,6 +5,7 @@ import Payment from '../models/Payment.js';
 import Enquiry from '../models/Enquiry.js';
 import { signToken } from '../middleware/auth.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
+import { prepareNewProvider, announceNewProvider } from './providerController.js';
 
 const isEmail = (v) => /\S+@\S+\.\S+/.test(v);
 const normalizePhone = (v) => v.replace(/[^\d+]/g, '');
@@ -89,9 +90,45 @@ export const register = asyncHandler(async (req, res) => {
     if (b.conditions) extra.conditions = String(b.conditions).split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20);
   }
 
+  if (role === 'doctor') {
+    // no account until the professional form is complete: check the whole profile before saving anything
+    if (!req.body.profile || typeof req.body.profile !== 'object') throw new ApiError(400, 'Please complete the professional form to create your account.');
+    const account = { name: String(name).trim(), email: query.email, phone: query.phone };
+    const provider = await prepareNewProvider(req.body.profile, account);
+    const user = await User.create({ name: provider.name || account.name, password, role, ...query });
+    try {
+      provider.user = user._id;
+      await provider.save();
+      user.provider = provider._id;
+      await user.save();
+    } catch (err) {
+      await Provider.deleteOne({ _id: provider._id }).catch(() => {});
+      await User.deleteOne({ _id: user._id }).catch(() => {});
+      throw err;
+    }
+    await announceNewProvider(provider);
+    return res.status(201).json({ ...(await sessionPayload(user)), provider, message: 'Profile submitted – the Carevaa team will review it. It will appear on the website once approved.' });
+  }
+
   const user = await User.create({ name: String(name).trim(), password, role, ...extra, ...query });
   await linkGuestRecords(user).catch(() => {});
   res.status(201).json(await sessionPayload(user));
+});
+
+// POST /api/auth/register-check  { identifier, role }  – before a doctor fills the professional form
+export const registerCheck = asyncHandler(async (req, res) => {
+  const { name, password } = req.body;
+  if (!name || !String(name).trim()) throw new ApiError(400, 'Full name is required');
+  if (!password || String(password).length < 6) throw new ApiError(400, 'Password must be at least 6 characters');
+  const query = identifierQuery(req.body.identifier);
+  const existing = await User.findOne(query);
+  if (existing) {
+    const unfinished = existing.role === 'doctor' && !(await Provider.exists({ user: existing._id }));
+    throw new ApiError(409, unfinished
+      ? 'You started registering with this email/phone earlier. Please login with your password to finish your professional profile.'
+      : 'An account with this email/phone already exists. Please login.');
+  }
+  res.json({ success: true });
 });
 
 // POST /api/auth/login  { identifier, password, role? }
