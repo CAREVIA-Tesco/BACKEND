@@ -48,6 +48,14 @@ const providerSchema = new mongoose.Schema(
     },
     // timings per consultation type: { clinic: { days: ['Mon'], sessions: [{ from: '10:00', to: '13:00' }], slotMins: 30 }, online: {...}, home: {...} }
     hours: { type: Object, default: undefined },
+    // identity proof: the number and photo are only sent to the Carevaa admin team (never public)
+    aadhaar: {
+      number: { type: String, select: false },
+      last4: String,
+      photo: { type: String, select: false }, // data:image/... (JPG / PNG / WebP)
+      photoUploaded: { type: Boolean, default: false },
+      updatedAt: Date,
+    },
     bank: {
       holderName: String,
       bankName: String,
@@ -80,6 +88,7 @@ providerSchema.set('toJSON', {
     ret.loc = ret.city || '';
     ret.rating = ret.reviews ? Number(ret.rating || 0).toFixed(1) : 'New'; // no reviews yet -> no rating
     if (ret.bank) delete ret.bank.accountNumber;
+    if (ret.aadhaar && !Object.keys(ret.aadhaar).length) delete ret.aadhaar;
     if (ret.user) ret.user = ret.user.toString();
     ret.offers = offersOf(ret);
     ret.modes = modesOf(ret);

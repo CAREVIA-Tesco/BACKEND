@@ -2,7 +2,7 @@ import Provider, { DAYS } from '../models/Provider.js';
 import Appointment from '../models/Appointment.js';
 import User from '../models/User.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
-import { specFor, DOCTOR_PROFESSIONS } from '../utils/format.js';
+import { specFor, isDoctorProfession, isValidAadhaar } from '../utils/format.js';
 import { notifyAdmins, notifyProvider, LINKS } from '../services/notify.js';
 import { TYPES, cleanHours, offersOf, scheduleUnion, hasHours, hoursText } from '../utils/slots.js';
 import { slotCalendar } from '../services/slotBooking.js';
@@ -26,7 +26,7 @@ function providerFields(body) {
   if (body.specialization !== undefined) f.specialization = body.specialization;
   if (body.profession || body.specialization) {
     f.spec = specFor(body.profession || 'MBBS Doctor', body.specialization);
-    f.isDoctor = DOCTOR_PROFESSIONS.includes(body.profession || 'MBBS Doctor');
+    f.isDoctor = isDoctorProfession(body.profession || 'MBBS Doctor');
   }
   if (body.spec) f.spec = body.spec;
   if (body.isDoctor !== undefined) f.isDoctor = Boolean(body.isDoctor);
@@ -74,11 +74,33 @@ function providerFields(body) {
   if (body.schedule && typeof body.schedule === 'object') {
     f.schedule = Object.fromEntries(DAYS.map((d) => [d, Array.isArray(body.schedule[d]) ? body.schedule[d] : []]));
   }
+  if (body.aadhaar && typeof body.aadhaar === 'object') {
+    const a = {};
+    const num = String(body.aadhaar.number || '').replace(/\s/g, '');
+    if (num) {
+      if (!isValidAadhaar(num)) throw new ApiError(400, 'Please enter a valid 12-digit Aadhaar number');
+      a.number = num; a.last4 = num.slice(-4);
+    }
+    const photo = String(body.aadhaar.photo || '');
+    if (photo) {
+      if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(photo)) throw new ApiError(400, 'Aadhaar photo must be a JPG, PNG or WebP image');
+      if (photo.length > 1600000) throw new ApiError(400, 'Aadhaar photo is too large – please use an image under 1 MB');
+      a.photo = photo; a.photoUploaded = true;
+    }
+    if (Object.keys(a).length) f.aadhaar = { ...a, updatedAt: new Date() };
+  }
   if (body.consultTypes && typeof body.consultTypes === 'object') {
     f.consultTypes = Object.fromEntries(TYPES.map((t) => [t, Boolean(body.consultTypes[t])]));
   }
   if (body.hours !== undefined) f.hours = cleanHours(body.hours);
   return f;
+}
+
+// copy form fields onto a profile; Aadhaar is merged so sending only the number keeps the saved photo
+function assignFields(provider, fields) {
+  const { aadhaar, ...rest } = fields;
+  Object.assign(provider, rest);
+  if (aadhaar) Object.entries(aadhaar).forEach(([k, v]) => provider.set(`aadhaar.${k}`, v));
 }
 
 // consultation types + timings: check them and keep the weekly `schedule` (used by admin views) in step
@@ -111,6 +133,7 @@ const publicProvider = (p) => {
   delete j.phone;
   delete j.email;
   delete j.user;
+  delete j.aadhaar;
   // fees only for the consultation types the professional offers
   if (!j.offers?.home) delete j.fee;
   if (!j.offers?.clinic) { delete j.clinicFee; delete j.clinic; }
@@ -162,7 +185,8 @@ export const myProvider = asyncHandler(async (req, res) => {
 
 // GET /api/providers/:id
 export const getProvider = asyncHandler(async (req, res) => {
-  const provider = await Provider.findById(req.params.id);
+  // the admin team also gets the Aadhaar number and photo to verify the professional
+  const provider = await Provider.findById(req.params.id).select(req.user?.role === 'admin' ? '+aadhaar.number +aadhaar.photo' : '');
   if (!provider) throw new ApiError(404, 'Provider not found');
   const isOwner = req.user && provider.user?.equals(req.user._id);
   if (provider.status !== 'ACTIVE' && req.user?.role !== 'admin' && !isOwner) throw new ApiError(404, 'Provider not found');
@@ -193,7 +217,7 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
   const isNew = !provider;
   let resubmitted = false;
   if (provider) {
-    Object.assign(provider, fields);
+    assignFields(provider, fields);
     // a rejected professional who updates their details goes back into the review queue
     if (provider.status === 'REJECTED') { provider.status = 'PENDING'; resubmitted = true; }
   } else {
@@ -235,6 +259,9 @@ export async function prepareNewProvider(body, account) {
   if (!String(bank.holderName || '').trim() || !String(bank.bankName || '').trim() || !String(bank.accountNumber || '').trim() || !String(bank.ifsc || '').trim()) {
     throw new ApiError(400, 'Please fill in all bank details');
   }
+  const ad = b.aadhaar || {};
+  if (!String(ad.number || '').trim()) throw new ApiError(400, 'Please enter your Aadhaar number');
+  if (!String(ad.photo || '').trim()) throw new ApiError(400, 'Please upload a photo of your Aadhaar card');
   const fields = providerFields(b);
   if (!fields.name) fields.name = account.name;
   const provider = new Provider({
@@ -269,7 +296,7 @@ export const updateProvider = asyncHandler(async (req, res) => {
   const isOwner = provider.user?.equals(req.user._id);
   if (req.user.role !== 'admin' && !isOwner) throw new ApiError(403, 'Not allowed');
 
-  Object.assign(provider, providerFields(req.body));
+  assignFields(provider, providerFields(req.body));
   applyConsultation(provider, req.body);
   if (req.user.role === 'admin' && req.body.status) provider.status = req.body.status;
   // a rejected professional who corrects their profile is sent back for review

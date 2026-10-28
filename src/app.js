@@ -25,7 +25,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '4mb' }));
 
 app.get('/', (_req, res) => res.json({ name: 'Carevaa API', status: 'running', docs: '/api/health' }));
 app.use('/api', routes);
