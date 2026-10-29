@@ -42,12 +42,13 @@ async function serviceCounts(svc) {
 }
 
 const slugify = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-const SERVICE_FIELDS = ['name', 'key', 'short', 'desc', 'price', 'image', 'order', 'icon', 'matches', 'status'];
+const SERVICE_FIELDS = ['name', 'key', 'short', 'desc', 'price', 'image', 'order', 'icon', 'matches', 'professions', 'status'];
 function serviceBody(body) {
   const f = Object.fromEntries(SERVICE_FIELDS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
   if (typeof f.name === 'string') f.name = f.name.trim();
   if (f.key !== undefined) f.key = slugify(f.key);
   if (f.matches !== undefined) f.matches = (Array.isArray(f.matches) ? f.matches : String(f.matches).split(',')).map((m) => String(m).trim()).filter(Boolean);
+  if (f.professions !== undefined) f.professions = (Array.isArray(f.professions) ? f.professions : String(f.professions).split(',')).map((m) => String(m).trim()).filter(Boolean);
   if (f.order !== undefined) f.order = Number(f.order) || 100;
   if (f.image && !/^(https?:\/\/|\/|data:image\/(jpeg|png|webp);base64,)/.test(f.image)) throw new ApiError(400, 'Image must be a link (https://...) or an uploaded picture');
   if (f.image && f.image.length > 900000) throw new ApiError(400, 'Image is too large – please use one under 600 KB');
@@ -58,8 +59,17 @@ const duplicate = (err) => {
   throw err;
 };
 
-export const listServices = asyncHandler(async (_req, res) => {
-  const services = await Service.find().sort({ order: 1, createdAt: 1 });
+export const listServices = asyncHandler(async (req, res) => {
+  const { profession, status } = req.query;
+  const filter = {};
+  if (status) filter.status = status;
+  if (profession) {
+    filter.$or = [
+      { professions: profession },
+      { matches: profession },
+    ];
+  }
+  const services = await Service.find(filter).sort({ order: 1, createdAt: 1 });
   res.json({ success: true, services: await Promise.all(services.map(serviceCounts)) });
 });
 

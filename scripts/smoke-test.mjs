@@ -45,6 +45,7 @@ const WEEK = Object.fromEntries(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'
 async function makeDoctor(name, email) {
   const profile = {
     name, profession: 'MBBS Doctor', specialization: 'General Physician', qualification: 'MBBS, MD', experience: 12, languages: 'English, Tamil',
+    registrationNumber: 'MCI-12345', registrationCouncil: 'Tamil Nadu Medical Council',
     onlineFee: 400, clinicFee: 600, city: 'Chennai', pincode: '600001', state: 'Tamil Nadu', schedule: WEEK,
     clinic: { name: 'City Care Clinic', address: '123 Main St, Anna Nagar' },
     aadhaar: { number: '367598342159', photo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' },

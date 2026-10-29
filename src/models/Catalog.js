@@ -35,6 +35,8 @@ const serviceSchema = new mongoose.Schema(
     icon: { type: String, default: 'Stethoscope' },
     // provider "spec" values whose bookings count towards this service
     matches: [String],
+    // Professions that can offer this service during registration (e.g. 'MBBS Doctor', 'Nurse', 'Physiotherapist', etc.)
+    professions: [{ type: String, trim: true }],
     status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
   },
   { timestamps: true }

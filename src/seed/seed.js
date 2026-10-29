@@ -55,15 +55,16 @@ const SPECIALIZATIONS = [
 // The services listed on the website (Home, Our Services, Book Now). Admin can add, edit, hide or re-order them.
 // "key" is the web address: built-in keys open their own page, new ones open /services/<key>.
 const SERVICES = [
-  { key: 'physiotherapy', name: 'Physiotherapy', short: 'Pain relief & rehab', desc: 'Recover from pain, injury or surgery with certified physios at home.', price: '₹800', icon: 'Activity', image: '/service-physio.png', matches: ['Physiotherapist'], order: 1 },
-  { key: 'nurse-care', name: 'Nurse Care', short: 'Skilled nursing at home', desc: 'Injections, IVs, wound care and post-hospital nursing by trained nurses.', price: '₹1,200', icon: 'Syringe', image: '/nurse-hero.jpg', matches: ['Nurse'], order: 2 },
-  { key: 'home-doctor', name: 'Home Doctor', short: 'Doctor at your doorstep', desc: 'General physicians who visit, diagnose and treat you at home.', price: '', icon: 'House', image: '/doctor-hero.png', matches: ['General Physician'], order: 3 },
-  { key: 'doctor-visit', name: 'Doctor Visit', short: 'Online & clinic consults', desc: 'Expert consultations online or at the clinic, with digital prescriptions.', price: '₹499', icon: 'Stethoscope', image: '/home-hero.jpg', matches: ['General Physician', 'Pediatrician', 'Cardiologist', 'Dermatologist', 'Orthopedic', 'Gynecologist', 'Neurologist'], order: 4 },
-  { key: 'care-taker', name: 'Care Taker', short: 'Elder & post-op care', desc: 'Trained attendants for elderly, post-operative and bedridden patients.', price: '', icon: 'Users', image: '/caretaker-section.png', matches: ['Care Taker'], order: 5 },
-  { key: 'baby-care', name: 'Baby Care', short: 'Mother & baby support', desc: 'Paediatric care and daily support for newborns, babies and new mothers.', price: '', icon: 'Baby', image: '/service-homecare.png', matches: ['Pediatrician'], order: 6 },
-  { key: 'ayurveda', name: 'Ayurveda', short: 'Natural healing', desc: 'Traditional Ayurvedic consultations and therapies at your doorstep.', price: '₹499', icon: 'Leaf', image: '/hero.png', matches: ['Ayurveda Doctor'], order: 7 },
-  { key: 'bhs', name: 'BHS', short: 'Basic health services', desc: 'Vitals monitoring, sample collection and essential health checks.', price: '', icon: 'HeartPulse', image: '/caretaker-hero.png', matches: ['BHS'], order: 8 },
-  { key: 'lab-tests', name: 'Lab Tests', short: 'Home sample collection', desc: 'Blood tests and diagnostics with home sample collection and quick, accurate reports from partner labs.', price: '', icon: 'FlaskConical', image: '/service-homecare.png', matches: ['Lab Centre'], order: 9 },
+  { key: 'physiotherapy', name: 'Physiotherapy', short: 'Pain relief & rehab', desc: 'Recover from pain, injury or surgery with certified physios at home.', price: '₹800', icon: 'Activity', image: '/service-physio.png', matches: ['Physiotherapist'], professions: ['Physiotherapist'], order: 1 },
+  { key: 'nurse-care', name: 'Nurse Care', short: 'Skilled nursing at home', desc: 'Injections, IVs, wound care and post-hospital nursing by trained nurses.', price: '₹1,200', icon: 'Syringe', image: '/nurse-hero.jpg', matches: ['Nurse'], professions: ['Nurse'], order: 2 },
+  { key: 'home-doctor', name: 'Home Doctor', short: 'Doctor at your doorstep', desc: 'General physicians who visit, diagnose and treat you at home.', price: '', icon: 'House', image: '/doctor-hero.png', matches: ['General Physician'], professions: ['MBBS Doctor'], order: 3 },
+  { key: 'doctor-visit', name: 'Doctor Visit', short: 'Online & clinic consults', desc: 'Expert consultations online or at the clinic, with digital prescriptions.', price: '₹499', icon: 'Stethoscope', image: '/home-hero.jpg', matches: ['General Physician', 'Pediatrician', 'Cardiologist', 'Dermatologist', 'Orthopedic', 'Gynecologist', 'Neurologist'], professions: ['MBBS Doctor'], order: 4 },
+  { key: 'care-taker', name: 'Care Taker', short: 'Elder & post-op care', desc: 'Trained attendants for elderly, post-operative and bedridden patients.', price: '', icon: 'Users', image: '/caretaker-section.png', matches: ['Care Taker'], professions: ['Caretaker'], order: 5 },
+  { key: 'baby-care', name: 'Baby Care', short: 'Mother & baby support', desc: 'Paediatric care and daily support for newborns, babies and new mothers.', price: '', icon: 'Baby', image: '/service-homecare.png', matches: ['Pediatrician', 'Nurse'], professions: ['Nurse', 'MBBS Doctor'], order: 6 },
+  { key: 'ayurveda', name: 'Ayurveda', short: 'Natural healing', desc: 'Traditional Ayurvedic consultations and therapies at your doorstep.', price: '₹499', icon: 'Leaf', image: '/hero.png', matches: ['Ayurveda Doctor'], professions: ['Ayurveda Doctor'], order: 7 },
+  { key: 'bhs', name: 'BHS', short: 'Basic health services', desc: 'Vitals monitoring, sample collection and essential health checks.', price: '', icon: 'HeartPulse', image: '/caretaker-hero.png', matches: ['BHS'], professions: ['BHS'], order: 8 },
+  { key: 'lab-tests', name: 'Lab Tests', short: 'Home sample collection', desc: 'Blood tests and diagnostics with home sample collection and quick, accurate reports from partner labs.', price: '', icon: 'FlaskConical', image: '/service-homecare.png', matches: ['Lab Centre'], professions: ['Lab Centre'], order: 9 },
+  { key: 'homeopathy', name: 'Homeopathy', short: 'Holistic healing & care', desc: 'Personalized homeopathic consultations and holistic remedies at home or online.', price: '₹499', icon: 'Leaf', image: '/hero.png', matches: ['Homeopathy Doctor'], professions: ['Homeopathy Doctor'], order: 10 },
 ];
 // Names used by the first version of the catalog -> the website service they became
 const OLD_SERVICE_NAMES = { 'Doctor Consultation': 'doctor-visit', 'Home Nursing': 'nurse-care', Physiotherapy: 'physiotherapy', 'Lab Tests': 'lab-tests', Ayurveda: 'ayurveda', Homeopathy: 'homeopathy' };
@@ -401,8 +402,17 @@ async function syncServices(log) {
     changed += 1;
   }
   for (const seeded of SERVICES) {
-    if (await Service.findOne({ key: seeded.key })) continue;
-    if (await Service.findOne({ name: seeded.name })) { await Service.updateOne({ name: seeded.name }, { $set: { key: seeded.key } }); changed += 1; continue; }
+    const existing = (await Service.findOne({ key: seeded.key })) || (await Service.findOne({ name: seeded.name }));
+    if (existing) {
+      let mod = false;
+      if (!existing.key) { existing.key = seeded.key; mod = true; }
+      if (!existing.professions || existing.professions.length === 0) {
+        existing.professions = seeded.professions;
+        mod = true;
+      }
+      if (mod) { await existing.save(); changed += 1; }
+      continue;
+    }
     await Service.create(seeded);
     changed += 1;
   }

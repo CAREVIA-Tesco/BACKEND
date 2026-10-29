@@ -111,6 +111,7 @@ router.delete('/specializations/:id', ...adminOnly, catalog.deleteSpecialization
 router.get('/services', catalog.listServices);
 router.post('/services', ...adminOnly, catalog.createService);
 router.put('/services/:id', ...adminOnly, catalog.updateService);
+router.patch('/services/:id', ...adminOnly, catalog.updateService);
 router.delete('/services/:id', ...adminOnly, catalog.deleteService);
 
 // Job applications

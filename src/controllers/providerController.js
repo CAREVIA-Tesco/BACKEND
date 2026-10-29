@@ -1,11 +1,43 @@
 import Provider, { DAYS } from '../models/Provider.js';
 import Appointment from '../models/Appointment.js';
 import User from '../models/User.js';
+import { Service } from '../models/Catalog.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
 import { specFor, isDoctorProfession, isValidAadhaar } from '../utils/format.js';
 import { notifyAdmins, notifyProvider, LINKS } from '../services/notify.js';
 import { TYPES, cleanHours, offersOf, scheduleUnion, hasHours, hoursText } from '../utils/slots.js';
 import { slotCalendar } from '../services/slotBooking.js';
+
+// Validates that services selected by a provider belong to their profession
+export async function validateProviderServices(profession, services = [], servicesOffered = []) {
+  const selectedNames = [
+    ...new Set([
+      ...(services || []).map((s) => (typeof s === 'string' ? s : s?.name)).filter(Boolean),
+      ...(servicesOffered || []),
+    ]),
+  ];
+  if (selectedNames.length === 0) return;
+
+  const catalogServices = await Service.find();
+  const catalogMap = new Map();
+  for (const cs of catalogServices) {
+    if (cs.name) catalogMap.set(cs.name.toLowerCase().trim(), cs);
+    if (cs.key) catalogMap.set(cs.key.toLowerCase().trim(), cs);
+  }
+
+  for (const name of selectedNames) {
+    const matchedService = catalogMap.get(name.toLowerCase().trim());
+    if (matchedService) {
+      const allowedProfessions = (matchedService.professions || []).map((p) => p.toLowerCase());
+      const matches = (matchedService.matches || []).map((m) => m.toLowerCase());
+      const profLower = (profession || '').toLowerCase();
+      const isAllowed = allowedProfessions.includes(profLower) || matches.includes(profLower);
+      if (!isAllowed && allowedProfessions.length > 0) {
+        throw new ApiError(400, `Service "${matchedService.name}" is not available for profession "${profession}".`);
+      }
+    }
+  }
+}
 
 // Professionals who register on the website start as PENDING and only appear on the site
 // (listings, search, profile page, booking) after an admin approves them (status ACTIVE).
@@ -45,10 +77,33 @@ function providerFields(body) {
   ['city', 'state', 'district', 'locality', 'email', 'phone', 'qualification', 'registrationNumber', 'registrationCouncil', 'gender', 'contactPerson', 'centreType', 'accreditation', 'trainingCertificates'].forEach((k) => {
     if (body[k] !== undefined) f[k] = typeof body[k] === 'string' ? body[k].trim() : body[k];
   });
+  if (body.services !== undefined) {
+    if (Array.isArray(body.services)) {
+      f.services = body.services.map((s) => {
+        if (typeof s === 'string') return { name: s.trim() };
+        return {
+          serviceId: s.serviceId || s.id,
+          serviceKey: s.serviceKey || s.key,
+          name: String(s.name || '').trim(),
+          description: s.description ? String(s.description).trim().slice(0, 500) : undefined,
+          price: num(s.price ?? s.fee),
+          homeAvailable: Boolean(s.homeAvailable),
+          onlineAvailable: Boolean(s.onlineAvailable),
+          clinicAvailable: Boolean(s.clinicAvailable),
+        };
+      }).filter((s) => s.name);
+      if (!body.servicesOffered) {
+        f.servicesOffered = f.services.map((s) => s.name);
+      }
+    }
+  }
   if (body.servicesOffered !== undefined) {
     f.servicesOffered = Array.isArray(body.servicesOffered)
-      ? body.servicesOffered
+      ? body.servicesOffered.map((s) => String(s).trim()).filter(Boolean)
       : String(body.servicesOffered).split(',').map((s) => s.trim()).filter(Boolean);
+    if (!f.services || f.services.length === 0) {
+      f.services = f.servicesOffered.map((name) => ({ name }));
+    }
   }
   if (body.careTypes !== undefined) {
     f.careTypes = Array.isArray(body.careTypes)
@@ -141,7 +196,7 @@ function applyConsultation(provider, body) {
 
 // GET /api/providers  (public: only ACTIVE providers; admin may pass ?status=ALL)
 // What patients and visitors may see about a professional (no bank, personal phone or email)
-const publicProvider = (p) => {
+const publicProvider = (p, inactiveSet = new Set()) => {
   const j = p.toJSON();
   delete j.bank;
   delete j.phone;
@@ -152,6 +207,12 @@ const publicProvider = (p) => {
   if (!j.offers?.home) delete j.fee;
   if (!j.offers?.clinic) { delete j.clinicFee; delete j.clinic; }
   if (!j.offers?.online) delete j.onlineFee;
+  if (j.services && Array.isArray(j.services)) {
+    j.services = j.services.filter((s) => !inactiveSet.has(String(s.name || '').toLowerCase().trim()) && (!s.serviceKey || !inactiveSet.has(String(s.serviceKey).toLowerCase().trim())));
+  }
+  if (j.servicesOffered && Array.isArray(j.servicesOffered)) {
+    j.servicesOffered = j.servicesOffered.filter((s) => !inactiveSet.has(String(s || '').toLowerCase().trim()));
+  }
   return j;
 };
 
@@ -188,7 +249,9 @@ export const listProviders = asyncHandler(async (req, res) => {
       providers: providers.map((p) => ({ ...p.toJSON(), bookings: countMap[p._id.toString()] || 0 })),
     });
   }
-  res.json({ success: true, count: providers.length, providers: providers.map(publicProvider) });
+  const inactiveServices = await Service.find({ status: 'Inactive' }).select('name key');
+  const inactiveSet = new Set(inactiveServices.flatMap((s) => [s.name?.toLowerCase().trim(), s.key?.toLowerCase().trim()]).filter(Boolean));
+  res.json({ success: true, count: providers.length, providers: providers.map((p) => publicProvider(p, inactiveSet)) });
 });
 
 // GET /api/providers/me  (logged-in doctor's own profile)
@@ -218,7 +281,9 @@ export const getProvider = asyncHandler(async (req, res) => {
     ]);
     stats = { total, completed, upcoming, revenue: revenueAgg[0]?.total || 0 };
   }
-  res.json({ success: true, provider: req.user?.role === 'admin' || isOwner ? provider : publicProvider(provider), stats });
+  const inactiveServices = await Service.find({ status: 'Inactive' }).select('name key');
+  const inactiveSet = new Set(inactiveServices.flatMap((s) => [s.name?.toLowerCase().trim(), s.key?.toLowerCase().trim()]).filter(Boolean));
+  res.json({ success: true, provider: req.user?.role === 'admin' || isOwner ? provider : publicProvider(provider, inactiveSet), stats });
 });
 
 // POST /api/providers/onboarding  (doctor submits / updates professional profile)
@@ -226,6 +291,7 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
   const fields = providerFields(req.body);
   if (!fields.name) fields.name = req.user.name;
   if (!req.body.profession) throw new ApiError(400, 'Please select your profession');
+  await validateProviderServices(req.body.profession, fields.services, fields.servicesOffered);
 
   let provider = await Provider.findOne({ user: req.user._id });
   const isNew = !provider;
@@ -293,6 +359,7 @@ export async function prepareNewProvider(body, account) {
   if (!String(ad.number || '').trim()) throw new ApiError(400, isLab ? 'Please enter the owner or contact person ID number' : 'Please enter your Aadhaar number');
   if (!String(ad.photo || '').trim()) throw new ApiError(400, isLab ? 'Please upload a photo of the owner or contact person ID card' : 'Please upload a photo of your Aadhaar card');
   const fields = providerFields(b);
+  await validateProviderServices(b.profession, fields.services, fields.servicesOffered);
   if (!fields.name) fields.name = account.name;
   const provider = new Provider({
     ...fields,
@@ -314,6 +381,8 @@ export async function announceNewProvider(provider) {
 export const createProvider = asyncHandler(async (req, res) => {
   const fields = providerFields(req.body);
   if (!fields.name) throw new ApiError(400, 'Name is required');
+  const targetProfession = fields.profession || req.body.profession || 'MBBS Doctor';
+  await validateProviderServices(targetProfession, fields.services, fields.servicesOffered);
   if (!fields.spec) fields.spec = specFor(req.body.profession || 'MBBS Doctor', req.body.specialization);
   const provider = await Provider.create({ ...fields, img: fields.img || avatarFor(fields.name), status: req.body.status || 'ACTIVE' });
   res.status(201).json({ success: true, provider });
@@ -326,7 +395,12 @@ export const updateProvider = asyncHandler(async (req, res) => {
   const isOwner = provider.user?.equals(req.user._id);
   if (req.user.role !== 'admin' && !isOwner) throw new ApiError(403, 'Not allowed');
 
-  assignFields(provider, providerFields(req.body));
+  const fields = providerFields(req.body);
+  const targetProfession = fields.profession || provider.profession || 'MBBS Doctor';
+  if (fields.services || fields.servicesOffered) {
+    await validateProviderServices(targetProfession, fields.services, fields.servicesOffered);
+  }
+  assignFields(provider, fields);
   applyConsultation(provider, req.body);
   if (req.user.role === 'admin' && req.body.status) provider.status = req.body.status;
   // a rejected professional who corrects their profile is sent back for review

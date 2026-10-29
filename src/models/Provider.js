@@ -4,6 +4,20 @@ import { offersOf, modesOf } from '../utils/slots.js';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+const providerServiceSchema = new mongoose.Schema(
+  {
+    serviceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Service' },
+    serviceKey: String,
+    name: { type: String, required: true },
+    description: String,
+    price: Number,
+    homeAvailable: { type: Boolean, default: false },
+    onlineAvailable: { type: Boolean, default: false },
+    clinicAvailable: { type: Boolean, default: false },
+  },
+  { _id: true }
+);
+
 const providerSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -16,7 +30,8 @@ const providerSchema = new mongoose.Schema(
     registrationCouncil: String,
     contactPerson: String, // Lab Centre: Owner or contact person name
     centreType: String, // Lab Centre: Diagnostic Lab, Pathology, Imaging, etc.
-    servicesOffered: [String], // Lab Centre: Tests and services available
+    servicesOffered: [String], // Array of active service names offered
+    services: [providerServiceSchema], // Structured services offered by this professional
     accreditation: String, // Lab Centre: NABL, ICMR, ISO, etc.
     careTypes: [String], // Caretaker: Types of care provided (Elderly, Bedridden, etc.)
     trainingCertificates: String, // Caretaker: Training certificates / details
