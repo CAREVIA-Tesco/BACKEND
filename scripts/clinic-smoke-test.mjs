@@ -41,6 +41,8 @@ const docProfile = {
   specialization: 'General Physician',
   qualification: 'MBBS, MD (General Medicine)',
   experience: 10,
+  registrationNumber: 'TNMC-556677',
+  registrationCouncil: 'Tamil Nadu Medical Council',
   languages: 'English, Tamil, Hindi',
   onlineFee: 500,
   clinicFee: 700,

@@ -63,6 +63,8 @@ const docReg = await req('/auth/register', {
       specialization: 'General Physician',
       qualification: 'MBBS, MD',
       experience: 10,
+      registrationNumber: 'TNMC-123456',
+      registrationCouncil: 'Tamil Nadu Medical Council',
       languages: 'English, Hindi',
       city: 'Chennai',
       state: 'Tamil Nadu',

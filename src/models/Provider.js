@@ -14,6 +14,12 @@ const providerSchema = new mongoose.Schema(
     qualification: String,
     registrationNumber: String,
     registrationCouncil: String,
+    contactPerson: String, // Lab Centre: Owner or contact person name
+    centreType: String, // Lab Centre: Diagnostic Lab, Pathology, Imaging, etc.
+    servicesOffered: [String], // Lab Centre: Tests and services available
+    accreditation: String, // Lab Centre: NABL, ICMR, ISO, etc.
+    careTypes: [String], // Caretaker: Types of care provided (Elderly, Bedridden, etc.)
+    trainingCertificates: String, // Caretaker: Training certificates / details
     bio: { type: String, maxlength: 600 },
     pincode: String,
     homeVisitRadiusKm: Number,

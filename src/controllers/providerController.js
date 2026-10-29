@@ -42,9 +42,23 @@ function providerFields(body) {
     if (v !== undefined) f[k] = v;
   });
   if (num(body.homeFee) !== undefined) f.fee = num(body.homeFee);
-  ['city', 'state', 'district', 'locality', 'email', 'phone', 'qualification', 'registrationNumber', 'registrationCouncil', 'gender'].forEach((k) => {
+  ['city', 'state', 'district', 'locality', 'email', 'phone', 'qualification', 'registrationNumber', 'registrationCouncil', 'gender', 'contactPerson', 'centreType', 'accreditation', 'trainingCertificates'].forEach((k) => {
     if (body[k] !== undefined) f[k] = typeof body[k] === 'string' ? body[k].trim() : body[k];
   });
+  if (body.servicesOffered !== undefined) {
+    f.servicesOffered = Array.isArray(body.servicesOffered)
+      ? body.servicesOffered
+      : String(body.servicesOffered).split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  if (body.careTypes !== undefined) {
+    f.careTypes = Array.isArray(body.careTypes)
+      ? body.careTypes
+      : String(body.careTypes).split(',').map((c) => c.trim()).filter(Boolean);
+  }
+  if (body.profession === 'Lab Centre' || f.profession === 'Lab Centre') {
+    f.gender = null;
+    f.isDoctor = false;
+  }
   if (body.gender === '') f.gender = null;
   if (body.bio !== undefined) f.bio = String(body.bio).trim().slice(0, 600);
   if (body.pincode !== undefined && body.pincode !== '') {
@@ -251,8 +265,24 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
 export async function prepareNewProvider(body, account) {
   const b = body || {};
   if (!b.profession) throw new ApiError(400, 'Please select your profession');
-  if (!String(b.qualification || '').trim()) throw new ApiError(400, 'Please enter your highest qualification');
-  if (b.experience === undefined || b.experience === '' || Number(b.experience) < 0) throw new ApiError(400, 'Please enter your years of experience');
+  const isLab = b.profession === 'Lab Centre';
+  const isCaretaker = b.profession === 'Caretaker';
+
+  if (!isLab && !isCaretaker && !String(b.qualification || '').trim()) {
+    throw new ApiError(400, b.profession === 'Nurse' ? 'Please enter your nursing qualification' : 'Please enter your highest qualification');
+  }
+
+  const needsRegistration = ['MBBS Doctor', 'Homeopathy Doctor', 'Ayurveda Doctor', 'Nurse'];
+  if (needsRegistration.includes(b.profession) && !String(b.registrationNumber || '').trim()) {
+    throw new ApiError(400, `Please enter your ${b.profession === 'Nurse' ? 'nursing ' : ''}council registration number`);
+  }
+  if (isLab && !String(b.registrationNumber || '').trim()) {
+    throw new ApiError(400, 'Please enter your laboratory registration or licence number');
+  }
+
+  if (b.experience === undefined || b.experience === '' || Number(b.experience) < 0) {
+    throw new ApiError(400, isLab ? 'Please enter years of operation' : 'Please enter your years of experience');
+  }
   if (!String(b.city || '').trim()) throw new ApiError(400, 'Please enter the city where you work');
   if (!/^[1-9]\d{5}$/.test(String(b.pincode || '').trim())) throw new ApiError(400, 'Please enter a valid 6-digit PIN code');
   const bank = b.bank || {};
@@ -260,8 +290,8 @@ export async function prepareNewProvider(body, account) {
     throw new ApiError(400, 'Please fill in all bank details');
   }
   const ad = b.aadhaar || {};
-  if (!String(ad.number || '').trim()) throw new ApiError(400, 'Please enter your Aadhaar number');
-  if (!String(ad.photo || '').trim()) throw new ApiError(400, 'Please upload a photo of your Aadhaar card');
+  if (!String(ad.number || '').trim()) throw new ApiError(400, isLab ? 'Please enter the owner or contact person ID number' : 'Please enter your Aadhaar number');
+  if (!String(ad.photo || '').trim()) throw new ApiError(400, isLab ? 'Please upload a photo of the owner or contact person ID card' : 'Please upload a photo of your Aadhaar card');
   const fields = providerFields(b);
   if (!fields.name) fields.name = account.name;
   const provider = new Provider({

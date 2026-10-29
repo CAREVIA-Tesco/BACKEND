@@ -46,6 +46,8 @@ async function registerDoc(name, email) {
       specialization: 'General Physician',
       qualification: 'MBBS, MD',
       experience: 12,
+      registrationNumber: 'DMC-998877',
+      registrationCouncil: 'Delhi Medical Council',
       languages: 'English, Hindi',
       onlineFee: 400,
       clinicFee: 600,
