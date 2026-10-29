@@ -15,6 +15,9 @@ const clinicPatientSchema = new mongoose.Schema(
     age: Number,
     gender: { type: String, enum: ['Male', 'Female', 'Other', null], default: null },
     phone: { type: String, required: true }, // 10 digits
+    email: { type: String, trim: true, lowercase: true, maxlength: 120 },
+    address: { type: String, trim: true, maxlength: 300 },
+    city: { type: String, trim: true, maxlength: 100 },
     visitCount: { type: Number, default: 0 },
     firstVisitAt: Date,
     lastVisitAt: Date,
@@ -41,6 +44,9 @@ clinicPatientSchema.set('toJSON', {
     age: ret.age,
     gender: ret.gender,
     phone: ret.phone,
+    email: ret.email || '',
+    address: ret.address || '',
+    city: ret.city || '',
     visitCount: ret.visitCount,
     firstVisitAt: ret.firstVisitAt,
     lastVisitAt: ret.lastVisitAt,
@@ -61,7 +67,12 @@ const clinicVisitSchema = new mongoose.Schema(
     treatment: { type: String, maxlength: 2000 },
     prescription: { type: String, maxlength: 3000 },
     nurseNotes: { type: String, maxlength: 2000 },
-    recordedBy: { type: String, trim: true, maxlength: 80 }, // nurse who typed it in on the doctor's dashboard
+    source: { type: String, enum: ['manual', 'shared_link'], default: 'manual' },
+    link: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicRegistrationLink' },
+    medicalHistory: { type: String, maxlength: 2000 },
+    allergies: { type: String, maxlength: 1000 },
+    currentMedications: { type: String, maxlength: 1000 },
+    recordedBy: { type: String, trim: true, maxlength: 80 }, // nurse who typed it in on the doctor's dashboard or link
     enteredBy: actor,
     updatedBy: { ...actor, at: Date },
   },
@@ -72,7 +83,9 @@ clinicVisitSchema.index({ provider: 1, visitDate: -1 });
 clinicVisitSchema.set('toJSON', {
   transform: (_doc, ret) => ({
     id: ret._id.toString(),
+    provider: ret.provider?.toString(),
     providerId: ret.provider?.toString(),
+    providerName: ret.providerName,
     doctor: ret.providerName,
     // patient is either an id or (when populated) the patient record, possibly already converted
     patientId: ret.patient?.name ? String(ret.patient.id || ret.patient._id) : ret.patient?.toString(),
@@ -84,6 +97,11 @@ clinicVisitSchema.set('toJSON', {
     treatment: ret.treatment || '',
     prescription: ret.prescription || '',
     nurseNotes: ret.nurseNotes || '',
+    source: ret.source || 'manual',
+    linkId: ret.link?.toString(),
+    medicalHistory: ret.medicalHistory || '',
+    allergies: ret.allergies || '',
+    currentMedications: ret.currentMedications || '',
     recordedBy: ret.recordedBy || '',
     enteredBy: ret.recordedBy ? `${ret.recordedBy} (nurse)` : ret.enteredBy?.name ? `${ret.enteredBy.name}${ret.enteredBy.role === 'nurse' ? ' (nurse)' : ''}` : '',
     updatedBy: ret.updatedBy?.name ? `${ret.updatedBy.name}${ret.updatedBy.role === 'nurse' ? ' (nurse)' : ''}` : '',
@@ -92,5 +110,81 @@ clinicVisitSchema.set('toJSON', {
   }),
 });
 
+const clinicRegistrationLinkSchema = new mongoose.Schema(
+  {
+    code: { type: String, unique: true }, // RL-10001
+    token: { type: String, required: true, unique: true, index: true },
+    provider: { type: mongoose.Schema.Types.ObjectId, ref: 'Provider', required: true, index: true },
+    providerName: String,
+    doctorSpecialization: String,
+    clinicName: String,
+    patientName: { type: String, trim: true, maxlength: 100 },
+    patientPhone: { type: String, trim: true },
+    notes: { type: String, maxlength: 1000 },
+    recordedBy: { type: String, trim: true, maxlength: 80 }, // Nurse who created the link
+    status: {
+      type: String,
+      enum: ['Pending', 'Submitted', 'Expired', 'Cancelled'],
+      default: 'Pending',
+      index: true,
+    },
+    submittedAt: Date,
+    expiresAt: { type: Date, index: true },
+    patient: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicPatient' },
+    visit: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicVisit' },
+    createdBy: actor,
+  },
+  { timestamps: true }
+);
+clinicRegistrationLinkSchema.index({ provider: 1, createdAt: -1 });
+
+clinicRegistrationLinkSchema.pre('save', async function assignCode(next) {
+  if (this.code) return next();
+  const count = await this.constructor.countDocuments();
+  this.code = `RL-${10001 + count}`;
+  if (!this.expiresAt) {
+    this.expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+  }
+  next();
+});
+
+clinicRegistrationLinkSchema.set('toJSON', {
+  transform: (_doc, ret) => ({
+    id: ret._id.toString(),
+    code: ret.code,
+    token: ret.token,
+    provider: ret.provider?.toString(),
+    providerId: ret.provider?.toString(),
+    providerName: ret.providerName,
+    doctor: ret.providerName,
+    doctorSpecialization: ret.doctorSpecialization,
+    clinicName: ret.clinicName,
+    patientName: ret.patientName || '',
+    patientPhone: ret.patientPhone || '',
+    notes: ret.notes || '',
+    recordedBy: ret.recordedBy || '',
+    status: ret.status,
+    submittedAt: ret.submittedAt,
+    expiresAt: ret.expiresAt,
+    patientId: ret.patient?._id ? ret.patient._id.toString() : ret.patient?.toString(),
+    patient: ret.patient?.name ? {
+      id: String(ret.patient._id || ret.patient.id),
+      code: ret.patient.code,
+      name: ret.patient.name,
+      phone: ret.patient.phone,
+    } : ret.patient?._id ? { id: ret.patient._id.toString() } : undefined,
+    visitId: ret.visit?._id ? ret.visit._id.toString() : ret.visit?.toString(),
+    visit: ret.visit?._id ? {
+      id: ret.visit._id.toString(),
+      visitDate: ret.visit.visitDate,
+      symptoms: ret.visit.symptoms,
+      diagnosis: ret.visit.diagnosis,
+    } : ret.visit ? { id: ret.visit.toString() } : undefined,
+    createdAt: ret.createdAt,
+    createdBy: ret.createdBy?.name,
+  }),
+});
+
 export const ClinicPatient = mongoose.model('ClinicPatient', clinicPatientSchema);
 export const ClinicVisit = mongoose.model('ClinicVisit', clinicVisitSchema);
+export const ClinicRegistrationLink = mongoose.model('ClinicRegistrationLink', clinicRegistrationLinkSchema);

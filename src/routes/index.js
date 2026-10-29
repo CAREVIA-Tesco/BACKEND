@@ -49,6 +49,16 @@ router.put('/clinic/visits/:id', ...clinicTeam, clinic.updateVisit);
 router.delete('/clinic/visits/:id', ...clinicTeam, clinic.deleteVisit);
 router.get('/admin/clinic/report', protect, authorize('admin'), clinic.adminReport);
 
+// Patient Registration Links (shared link workflow for doctors and nurses)
+router.post('/clinic/registration-links', ...clinicTeam, clinic.createRegistrationLink);
+router.get('/clinic/registration-links', ...clinicTeam, clinic.listRegistrationLinks);
+router.get('/clinic/registration-links/:id', ...clinicTeam, clinic.getRegistrationLink);
+router.delete('/clinic/registration-links/:id', ...clinicTeam, clinic.cancelRegistrationLink);
+
+// Public Patient Registration Form via Shared Link (no auth required)
+router.get('/clinic/public/register/:token', clinic.getPublicRegistrationLink);
+router.post('/clinic/public/register/:token', clinic.submitPublicRegistration);
+
 // Notifications (bell icon in every dashboard)
 router.get('/notifications', protect, notifications.listNotifications);
 router.post('/notifications/read-all', protect, notifications.markAllRead);

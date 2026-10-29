@@ -1,6 +1,8 @@
-import { ClinicPatient, ClinicVisit } from '../models/ClinicRecord.js';
+import crypto from 'crypto';
+import { ClinicPatient, ClinicVisit, ClinicRegistrationLink } from '../models/ClinicRecord.js';
 import Provider from '../models/Provider.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
+import { notifyProvider, notifyAdmins } from '../services/notify.js';
 
 // Patient Visit Management (walk-in clinic visits).
 //  - doctor: their own patients and visits. A nurse works on the doctor's dashboard and adds her
@@ -48,9 +50,11 @@ function dateRange(q) {
 
 function visitFields(b) {
   const f = {};
-  ['symptoms', 'diagnosis', 'treatment', 'nurseNotes'].forEach((k) => { if (b[k] !== undefined) f[k] = clean(b[k]); });
+  ['symptoms', 'diagnosis', 'treatment', 'nurseNotes', 'medicalHistory', 'allergies', 'currentMedications'].forEach((k) => { if (b[k] !== undefined) f[k] = clean(b[k]); });
   if (b.prescription !== undefined) f.prescription = clean(b.prescription, 3000);
   if (b.recordedBy !== undefined) f.recordedBy = clean(b.recordedBy, 80);
+  if (b.source !== undefined) f.source = b.source;
+  if (b.link !== undefined) f.link = b.link;
   if (b.visitDate !== undefined) {
     const d = /^\d{4}-\d{2}-\d{2}$/.test(String(b.visitDate)) ? new Date(`${b.visitDate}T${isoDay(new Date()) === b.visitDate ? new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(11, 19) : '10:00:00'}${TZ}`) : new Date(b.visitDate);
     if (Number.isNaN(d.getTime())) throw new ApiError(400, 'Please enter a valid visit date');
@@ -75,6 +79,9 @@ function patientFields(p) {
     if (!['Male', 'Female', 'Other'].includes(p.gender)) throw new ApiError(400, 'Please choose the gender');
     out.gender = p.gender;
   }
+  if (p.email !== undefined && p.email !== '') out.email = clean(p.email, 120).toLowerCase();
+  if (p.address !== undefined && p.address !== '') out.address = clean(p.address, 300);
+  if (p.city !== undefined && p.city !== '') out.city = clean(p.city, 100);
   return out;
 }
 
@@ -341,3 +348,349 @@ export const adminReport = asyncHandler(async (req, res) => {
   }
   res.json({ success: true, ...(await buildReport(req.query, providers)) });
 });
+
+// ---------------------------------------------------------------- shared registration links
+
+// POST /api/clinic/registration-links
+// Nurse or doctor generates a unique registration link to share with a walk-in or prospective patient.
+export const createRegistrationLink = asyncHandler(async (req, res) => {
+  const provider = await clinicProvider(req, { forWrite: true });
+  const b = req.body || {};
+  const token = crypto.randomBytes(24).toString('hex');
+  const recordedBy = clean(b.recordedBy, 80);
+  const patientName = clean(b.patientName, 100);
+  const patientPhone = b.patientPhone ? digits(b.patientPhone) : '';
+  const notes = clean(b.notes, 1000);
+
+  const link = await ClinicRegistrationLink.create({
+    token,
+    provider: provider._id,
+    providerName: provider.name,
+    doctorSpecialization: provider.spec || '',
+    clinicName: provider.clinic?.name || '',
+    patientName,
+    patientPhone,
+    notes,
+    recordedBy,
+    createdBy: actorOf(req.user),
+  });
+
+  res.status(201).json({
+    success: true,
+    message: 'Patient registration link generated successfully',
+    link,
+    url: `/register-patient/${token}`,
+  });
+});
+
+// GET /api/clinic/registration-links?status=&search=
+// Doctor/nurse sees their own links; admin sees all (or ?providerId=).
+export const listRegistrationLinks = asyncHandler(async (req, res) => {
+  const provider = await clinicProvider(req);
+  const filter = { ...scope(provider) };
+
+  if (req.query.status && req.query.status !== 'all') {
+    filter.status = req.query.status;
+  }
+
+  const q = clean(req.query.search, 60);
+  if (q) {
+    const rx = new RegExp(escapeRx(q), 'i');
+    filter.$or = [
+      { patientName: rx },
+      { code: rx },
+      { patientPhone: new RegExp(escapeRx(q.replace(/\D/g, '') || q)) },
+      { recordedBy: rx },
+      { notes: rx },
+    ];
+  }
+
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const links = await ClinicRegistrationLink.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .populate('patient', 'code name age gender phone')
+    .populate('visit', 'visitDate symptoms diagnosis prescription nurseNotes');
+
+  res.json({ success: true, links });
+});
+
+// GET /api/clinic/registration-links/:id
+export const getRegistrationLink = asyncHandler(async (req, res) => {
+  const link = await ClinicRegistrationLink.findById(req.params.id)
+    .populate('patient')
+    .populate('visit');
+  if (!link) throw new ApiError(404, 'Registration link not found');
+  if (req.user.role !== 'admin') {
+    const provider = await clinicProvider(req);
+    if (!link.provider.equals(provider._id)) throw new ApiError(404, 'Registration link not found');
+  }
+  res.json({ success: true, link });
+});
+
+// DELETE /api/clinic/registration-links/:id
+export const cancelRegistrationLink = asyncHandler(async (req, res) => {
+  const link = await ClinicRegistrationLink.findById(req.params.id);
+  if (!link) throw new ApiError(404, 'Registration link not found');
+  if (req.user.role !== 'admin') {
+    const provider = await clinicProvider(req);
+    if (!link.provider.equals(provider._id)) throw new ApiError(404, 'Registration link not found');
+  }
+  if (link.status === 'Submitted') {
+    throw new ApiError(400, 'Cannot cancel a registration link that has already been submitted');
+  }
+  link.status = 'Cancelled';
+  await link.save();
+  res.json({ success: true, message: 'Registration link cancelled' });
+});
+
+// GET /api/clinic/public/register/:token (Public - patient opens the shared link on their phone)
+export const getPublicRegistrationLink = asyncHandler(async (req, res) => {
+  const token = String(req.params.token || '').trim();
+  if (!token || token.length < 16) throw new ApiError(400, 'Invalid registration link');
+
+  const link = await ClinicRegistrationLink.findOne({ token }).populate('provider', 'name spec clinic image location address phone experience');
+  if (!link) throw new ApiError(404, 'Registration link not found or invalid');
+
+  // Check expiration
+  if (link.expiresAt && link.expiresAt.getTime() < Date.now() && link.status === 'Pending') {
+    link.status = 'Expired';
+    await link.save();
+  }
+
+  const provider = link.provider || {};
+  const clinicInfo = {
+    doctorName: provider.name || link.providerName,
+    specialization: provider.spec || link.doctorSpecialization || 'Specialist',
+    clinicName: provider.clinic?.name || link.clinicName || 'Clinic Desk',
+    clinicAddress: provider.clinic?.address || provider.address || '',
+    clinicPhone: provider.clinic?.phone || provider.phone || '',
+    doctorImage: provider.image || '',
+    experience: provider.experience ? `${provider.experience} Years Experience` : '',
+  };
+
+  if (link.status === 'Submitted') {
+    return res.json({
+      success: true,
+      status: 'Submitted',
+      submittedAt: link.submittedAt,
+      clinic: clinicInfo,
+      patientName: link.patientName || '',
+      message: 'This registration link has already been submitted. Your details have been received by the clinic team.',
+    });
+  }
+
+  if (link.status === 'Expired') {
+    return res.json({
+      success: true,
+      status: 'Expired',
+      clinic: clinicInfo,
+      message: 'This registration link has expired. Please ask the clinic nurse for a new link.',
+    });
+  }
+
+  if (link.status === 'Cancelled') {
+    return res.json({
+      success: true,
+      status: 'Cancelled',
+      clinic: clinicInfo,
+      message: 'This registration link is no longer valid.',
+    });
+  }
+
+  // Pending
+  res.json({
+    success: true,
+    status: 'Pending',
+    clinic: clinicInfo,
+    prefill: {
+      name: link.patientName || '',
+      patientName: link.patientName || '',
+      phone: link.patientPhone || '',
+      patientPhone: link.patientPhone || '',
+      notes: link.notes || '',
+    },
+  });
+});
+
+// POST /api/clinic/public/register/:token (Public - patient submits their registration form)
+export const submitPublicRegistration = asyncHandler(async (req, res) => {
+  const token = String(req.params.token || '').trim();
+  if (!token || token.length < 16) throw new ApiError(400, 'Invalid registration token');
+
+  // Find link and check status
+  const link = await ClinicRegistrationLink.findOne({ token });
+  if (!link) throw new ApiError(404, 'Registration link not found or invalid');
+
+  // Duplicate submission prevention
+  if (link.status === 'Submitted') {
+    throw new ApiError(409, 'This registration link has already been submitted. Duplicate submissions are not permitted.');
+  }
+  if (link.status === 'Expired' || (link.expiresAt && link.expiresAt.getTime() < Date.now())) {
+    link.status = 'Expired';
+    await link.save();
+    throw new ApiError(410, 'This registration link has expired. Please ask the clinic nurse for a fresh link.');
+  }
+  if (link.status === 'Cancelled') {
+    throw new ApiError(410, 'This registration link is no longer valid.');
+  }
+
+  const provider = await Provider.findById(link.provider);
+  if (!provider) throw new ApiError(404, 'Associated doctor profile not found');
+
+  const b = req.body || {};
+
+  // Validate required patient details
+  const name = clean(b.name, 100);
+  const phone = digits(b.phone);
+  if (!name || name.length < 2) throw new ApiError(400, 'Please enter your full name (at least 2 characters)');
+  if (!/^[6-9]\d{9}$/.test(phone)) throw new ApiError(400, 'Please enter a valid 10-digit mobile number');
+
+  const age = Number(b.age);
+  if (b.age === undefined || b.age === '' || b.age === null || !Number.isInteger(age) || age < 0 || age > 120) {
+    throw new ApiError(400, 'Please enter a valid age in years (0–120)');
+  }
+
+  const gender = String(b.gender || '').trim();
+  if (!['Male', 'Female', 'Other'].includes(gender)) {
+    throw new ApiError(400, 'Please select your gender (Male, Female, or Other)');
+  }
+
+  // Validate visit symptoms / reason for visit
+  const chiefComplaint = clean(b.symptoms || b.chiefComplaint, 2000);
+  if (!chiefComplaint || chiefComplaint.length < 3) {
+    throw new ApiError(400, 'Please describe your symptoms or reason for visit');
+  }
+
+  const email = clean(b.email, 120).toLowerCase();
+  const address = clean(b.address, 300);
+  const city = clean(b.city, 100);
+  const medicalHistory = clean(b.medicalHistory, 1000);
+  const currentMedications = clean(b.currentMedications, 1000);
+  const allergies = clean(b.allergies, 1000);
+  const patientNotes = clean(b.notes, 1000);
+
+  const visitDateStr = b.visitDate || isoDay(new Date());
+  const visitDate = /^\d{4}-\d{2}-\d{2}$/.test(String(visitDateStr))
+    ? new Date(`${visitDateStr}T${new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(11, 19)}${TZ}`)
+    : new Date();
+
+  // Deduplication: Look for existing ClinicPatient for this doctor with same phone + nameKey
+  const nKey = nameKey(name);
+  let patient = await ClinicPatient.findOne({ provider: provider._id, phone, nameKey: nKey });
+  let isNewPatient = false;
+
+  if (patient) {
+    patient.age = age;
+    patient.gender = gender;
+    if (email) patient.email = email;
+    if (address) patient.address = address;
+    if (city) patient.city = city;
+    await patient.save();
+  } else {
+    try {
+      patient = await ClinicPatient.create({
+        provider: provider._id,
+        providerName: provider.name,
+        name,
+        nameKey: nKey,
+        phone,
+        age,
+        gender,
+        email,
+        address,
+        city,
+        createdBy: { name: link.recordedBy ? `${link.recordedBy} (Shared Link)` : 'Online Registration', role: 'patient' },
+      });
+      isNewPatient = true;
+    } catch (e) {
+      if (e.code === 11000) {
+        patient = await ClinicPatient.findOne({ provider: provider._id, phone, nameKey: nKey });
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  // Compile detailed visit symptoms
+  const symptomParts = [chiefComplaint];
+  if (medicalHistory) symptomParts.push(`Past Medical History: ${medicalHistory}`);
+  if (currentMedications) symptomParts.push(`Current Medications: ${currentMedications}`);
+  if (allergies) symptomParts.push(`Known Allergies: ${allergies}`);
+  const compiledSymptoms = symptomParts.join('\n');
+
+  const nurseNotesParts = [];
+  if (patientNotes) nurseNotesParts.push(`Patient note: ${patientNotes}`);
+  nurseNotesParts.push(`[Online Registration via link ${link.code}]`);
+  if (link.recordedBy) nurseNotesParts.push(`Link generated by: ${link.recordedBy}`);
+
+  // Create ClinicVisit
+  const visit = await ClinicVisit.create({
+    provider: provider._id,
+    providerName: provider.name,
+    patient: patient._id,
+    patientName: patient.name,
+    visitDate,
+    symptoms: compiledSymptoms,
+    nurseNotes: nurseNotesParts.join(' | '),
+    recordedBy: link.recordedBy ? `${link.recordedBy} (Shared Link)` : 'Online Registration',
+    enteredBy: { name: `${patient.name} (Online Self-Registration)`, role: 'patient' },
+    source: 'shared_link',
+    link: link._id,
+    medicalHistory,
+    allergies,
+    currentMedications,
+  });
+
+  await refreshPatientStats(patient._id);
+
+  // Atomically update link status
+  link.status = 'Submitted';
+  link.submittedAt = new Date();
+  link.patient = patient._id;
+  link.patientName = patient.name;
+  link.patientPhone = patient.phone;
+  link.visit = visit._id;
+  await link.save();
+
+  // Notify doctor & admin
+  await notifyProvider(provider._id, {
+    type: 'clinic',
+    title: 'New patient registered online',
+    body: `${patient.name} (${patient.code}) submitted clinic registration form.`,
+    link: '/doctor/dashboard?tab=Patient%20Visits',
+  });
+  await notifyAdmins({
+    type: 'clinic',
+    title: 'Online patient registration received',
+    body: `${patient.name} registered online for Dr. ${provider.name} (${link.code}).`,
+    link: '/admin/clinic-records',
+  });
+
+  res.status(201).json({
+    success: true,
+    message: isNewPatient
+      ? `Registration successful! New patient ${patient.code} registered.`
+      : `Registration successful! Visit linked to existing record ${patient.code}.`,
+    patient: {
+      id: patient._id.toString(),
+      code: patient.code,
+      name: patient.name,
+      phone: patient.phone,
+      age: patient.age,
+      gender: patient.gender,
+      email: patient.email || '',
+    },
+    visit: {
+      id: visit._id.toString(),
+      visitDate: visit.visitDate,
+    },
+    doctor: {
+      name: provider.name,
+      spec: provider.spec,
+      clinic: provider.clinic?.name || '',
+    },
+    isNewPatient,
+  });
+});
+

@@ -43,14 +43,17 @@ console.log('Providers (test doctors are created through the real onboarding flo
 const A0 = admin.data.token;
 const WEEK = Object.fromEntries(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => [d, ['10:00 AM', '11:00 AM', '02:00 PM', '04:00 PM']]));
 async function makeDoctor(name, email) {
-  const r = await call('POST', '/auth/register', { name, identifier: email, password: 'Doctor@123', role: 'doctor' });
-  const o = await call('POST', '/providers/onboarding', {
-    name, profession: 'MBBS Doctor', specialization: 'General Physician', experience: 12, languages: 'English, Tamil',
-    onlineFee: 400, clinicFee: 600, city: 'Chennai', state: 'Tamil Nadu', schedule: WEEK,
+  const profile = {
+    name, profession: 'MBBS Doctor', specialization: 'General Physician', qualification: 'MBBS, MD', experience: 12, languages: 'English, Tamil',
+    onlineFee: 400, clinicFee: 600, city: 'Chennai', pincode: '600001', state: 'Tamil Nadu', schedule: WEEK,
+    clinic: { name: 'City Care Clinic', address: '123 Main St, Anna Nagar' },
+    aadhaar: { number: '367598342159', photo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' },
     bank: { holderName: name, bankName: 'SBI', accountNumber: '123412341234', ifsc: 'SBIN0001234' },
-  }, r.data.token);
-  await call('PATCH', `/providers/${o.data.provider.id}/status`, { status: 'ACTIVE' }, A0);
-  return { token: r.data.token, id: o.data.provider.id };
+  };
+  const r = await call('POST', '/auth/register', { name, identifier: email, password: 'Doctor@123', role: 'doctor', profile });
+  const pId = r.data.provider?._id || r.data.provider?.id || r.data.user?.providerId;
+  await call('PATCH', `/providers/${pId}/status`, { status: 'ACTIVE' }, A0);
+  return { token: r.data.token, id: pId };
 }
 const docA = await makeDoctor(`Dr. Test Ramesh ${stamp}`, `ramesh${stamp}@test.com`);
 const docB = await makeDoctor(`Dr. Test Other ${stamp}`, `other${stamp}@test.com`);
@@ -104,15 +107,17 @@ const cancel = await call('PATCH', `/appointments/${b2.data.appointment.id}/canc
 check('patient cancels paid booking -> refunded', cancel.data.appointment?.status === 'Cancelled' && cancel.data.appointment.paymentStatus === 'Refunded');
 
 console.log('Onboarding & approval');
-const docReg = await call('POST', '/auth/register', { name: 'Dr. New', identifier: `d${stamp}@test.com`, password: 'secret12', role: 'doctor' });
-const N = docReg.data.token;
-const onboard = await call('POST', '/providers/onboarding', {
-  name: 'Dr. New Physio', profession: 'Physiotherapist', specialization: 'Sports Physiotherapy', experience: 7, languages: 'English, Tamil',
-  homeFee: 900, onlineFee: 500, clinicFee: 700, city: 'Chennai', state: 'Tamil Nadu',
+const docProfile = {
+  name: 'Dr. New Physio', profession: 'Physiotherapist', specialization: 'Sports Physiotherapy', qualification: 'BPT', experience: 7, languages: 'English, Tamil',
+  homeFee: 900, onlineFee: 500, clinicFee: 700, city: 'Chennai', pincode: '600001', state: 'Tamil Nadu',
+  clinic: { name: 'Physio Care Clinic', address: '45 Lake Road' },
+  aadhaar: { number: '456789123451', photo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' },
   bank: { holderName: 'Dr New', bankName: 'HDFC', accountNumber: '123456789012', ifsc: 'hdfc0001234' },
   schedule: { Mon: ['09:00 AM'], Tue: [] },
-}, N);
-check('doctor onboarding -> live immediately', onboard.status === 201 && onboard.data.provider.status === 'ACTIVE' && onboard.data.provider.spec === 'Physiotherapist', JSON.stringify(onboard.data));
+};
+const docReg = await call('POST', '/auth/register', { name: 'Dr. New', identifier: `d${stamp}@test.com`, password: 'secret12', role: 'doctor', profile: docProfile });
+const onboard = docReg;
+check('doctor registration with profile', onboard.status === 201 && onboard.data.provider.spec === 'Physiotherapist', JSON.stringify(onboard.data));
 check('bank account number is masked', onboard.data.provider?.bank?.accountLast4 === '9012' && !onboard.data.provider.bank.accountNumber);
 const newId = onboard.data.provider.id;
 const shown = await call('GET', '/providers');
@@ -230,6 +235,97 @@ const statsE = await call('GET', '/admin/stats', null, A);
 check('admin stats include enquiry counts', typeof statsE.data.stats.newEnquiries === 'number');
 const blog = await call('GET', '/content/blog');
 check('blog posts have slug + body', blog.data.items.every((p) => p.slug && Array.isArray(p.body) && p.body.length));
+}
+
+{
+console.log('Clinic Patient Registration (Manual & Shared Link)');
+const cPhone1 = `9${String(Date.now()).slice(-9)}`;
+const cPhone2 = `8${String(Date.now()).slice(-9)}`;
+
+// 1. Manual registration by nurse from Doctor Dashboard
+const manVisit = await call('POST', '/clinic/visits', {
+  patient: { name: 'Manual Patient', phone: cPhone1, age: 35, gender: 'Male' },
+  visitDate: new Date().toISOString().slice(0, 10),
+  symptoms: 'Mild cold and headache',
+  diagnosis: 'Seasonal Rhinitis',
+  treatment: 'Steam inhalation',
+  recordedBy: 'Nurse Alice',
+}, D);
+check('nurse adds patient manually from Doctor Dashboard', manVisit.status === 201 && manVisit.data.patient?.code && manVisit.data.visit?.id, JSON.stringify(manVisit.data));
+
+// 2. Doctor / Nurse generates a unique registration link
+const genLink = await call('POST', '/clinic/registration-links', {
+  patientName: 'Self Reg Patient',
+  patientPhone: cPhone2,
+  recordedBy: 'Nurse Alice',
+  notes: 'Walk-in registration intake',
+}, D);
+check('nurse generates unique patient registration link', genLink.status === 201 && genLink.data.link?.token && genLink.data.link.status === 'Pending', JSON.stringify(genLink.data));
+const regToken = genLink.data.link.token;
+const linkId = genLink.data.link.id;
+
+// 3. Patient opens the public registration link (no login required)
+const pubLink = await call('GET', `/clinic/public/register/${regToken}`);
+check('patient loads public registration form', pubLink.status === 200 && pubLink.data.status === 'Pending' && pubLink.data.clinic?.doctorName);
+
+// 4. Validation: submitting missing required fields is rejected
+const badSub = await call('POST', `/clinic/public/register/${regToken}`, {
+  name: 'X', // too short
+  phone: '123', // invalid phone
+});
+check('validation rejects invalid patient registration fields', badSub.status === 400);
+
+// 5. Patient submits their registration details
+const goodSub = await call('POST', `/clinic/public/register/${regToken}`, {
+  name: 'Self Reg Patient',
+  phone: cPhone2,
+  age: 28,
+  gender: 'Female',
+  symptoms: 'Severe migraine for 2 days, sensitivity to light',
+  medicalHistory: 'None',
+  currentMedications: 'Paracetamol',
+  allergies: 'None',
+  notes: 'Morning clinic appointment',
+});
+check('patient successfully submits registration form', goodSub.status === 201 && goodSub.data.patient?.code && goodSub.data.visit?.id, JSON.stringify(goodSub.data));
+
+// 6. Duplicate prevention: submitting the same link again must fail
+const dupSub = await call('POST', `/clinic/public/register/${regToken}`, {
+  name: 'Self Reg Patient',
+  phone: cPhone2,
+  age: 28,
+  gender: 'Female',
+  symptoms: 'Duplicate attempt',
+});
+check('duplicate submission on same link rejected (409)', dupSub.status === 409);
+
+// 7. Opening link after submission shows "Submitted" status
+const afterPub = await call('GET', `/clinic/public/register/${regToken}`);
+check('re-opening submitted link displays Submitted status', afterPub.status === 200 && afterPub.data.status === 'Submitted');
+
+// 8. Details automatically appear in doctor's Patient Visits
+const docPatients = await call('GET', '/clinic/patients', null, D);
+check('submitted patient appears in doctor patient records', docPatients.data.patients?.some((p) => p.code === goodSub.data.patient.code));
+
+const docVisits = await call('GET', '/clinic/visits', null, D);
+check('submitted visit appears in doctor Patient Visits', docVisits.data.visits?.some((v) => v.id === goodSub.data.visit.id));
+
+// 9. Status of registration link shows "Submitted" in doctor dashboard
+const docLinks = await call('GET', '/clinic/registration-links', null, D);
+const updatedLink = docLinks.data.links?.find((l) => l.id === linkId);
+check('registration link status updated to Submitted', updatedLink && updatedLink.status === 'Submitted');
+
+// 10. Same patient details visible in Admin Panel
+const adminVisits = await call('GET', `/clinic/visits?providerId=${ramesh.id}`, null, A);
+check('submitted patient visit visible in Admin Panel', adminVisits.data.visits?.some((v) => v.id === goodSub.data.visit.id));
+
+const adminPats = await call('GET', `/clinic/patients?providerId=${ramesh.id}`, null, A);
+check('submitted patient record visible in Admin Panel', adminPats.data.patients?.some((p) => p.code === goodSub.data.patient.code));
+
+// 11. Cancelling an unsubmitted link
+const linkToCancel = await call('POST', '/clinic/registration-links', { recordedBy: 'Nurse Alice' }, D);
+const cancelRes = await call('DELETE', `/clinic/registration-links/${linkToCancel.data.link.id}`, null, D);
+check('nurse can cancel an unused link', cancelRes.status === 200);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
