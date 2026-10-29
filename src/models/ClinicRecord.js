@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextCode, nextDailyAppointmentNumber, isoDayIST } from './Counter.js';
 
 // Walk-in clinic patients and their visits, entered by the doctor or the doctor's nurse
 // (Doctor Dashboard → Patient Visits; a nurse uses the doctor's dashboard and adds her name). One patient record per doctor per (mobile + name),
@@ -29,8 +30,7 @@ clinicPatientSchema.index({ provider: 1, phone: 1, nameKey: 1 }, { unique: true 
 
 clinicPatientSchema.pre('save', async function assignCode(next) {
   if (this.code) return next();
-  const count = await this.constructor.countDocuments();
-  this.code = `CP-${10001 + count}`;
+  this.code = await nextCode('clinic_patient', 'CP', 5, 10001);
   next();
 });
 
@@ -57,6 +57,10 @@ clinicPatientSchema.set('toJSON', {
 
 const clinicVisitSchema = new mongoose.Schema(
   {
+    appointmentNumber: { type: String, index: true },
+    dailySequence: { type: Number, index: true }, // 1, 2, 3... resets to 1 daily per doctor
+    appointmentDate: { type: String, index: true }, // YYYY-MM-DD in Asia/Kolkata
+    code: { type: String, index: true }, // alias for appointmentNumber
     provider: { type: mongoose.Schema.Types.ObjectId, ref: 'Provider', required: true, index: true },
     providerName: String,
     patient: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicPatient', required: true, index: true },
@@ -79,10 +83,30 @@ const clinicVisitSchema = new mongoose.Schema(
   { timestamps: true }
 );
 clinicVisitSchema.index({ provider: 1, visitDate: -1 });
+clinicVisitSchema.index({ provider: 1, appointmentDate: 1, dailySequence: 1 }, { unique: true, sparse: true });
+
+clinicVisitSchema.pre('save', async function assignAppointmentNumber(next) {
+  if (!this.appointmentDate) {
+    this.appointmentDate = isoDayIST(this.visitDate || new Date());
+  }
+  if (!this.dailySequence || !this.appointmentNumber) {
+    const { dailySeq, appointmentNumber } = await nextDailyAppointmentNumber(this.provider, this.appointmentDate);
+    this.dailySequence = dailySeq;
+    this.appointmentNumber = appointmentNumber;
+    this.code = appointmentNumber;
+  } else if (!this.code) {
+    this.code = this.appointmentNumber;
+  }
+  next();
+});
 
 clinicVisitSchema.set('toJSON', {
   transform: (_doc, ret) => ({
     id: ret._id.toString(),
+    appointmentNumber: ret.appointmentNumber || (ret.dailySequence ? String(ret.dailySequence).padStart(3, '0') : '') || ret.code || '',
+    dailySequence: ret.dailySequence,
+    appointmentDate: ret.appointmentDate,
+    code: ret.code || ret.appointmentNumber || '',
     provider: ret.provider?.toString(),
     providerId: ret.provider?.toString(),
     providerName: ret.providerName,
@@ -132,6 +156,9 @@ const clinicRegistrationLinkSchema = new mongoose.Schema(
     expiresAt: { type: Date, index: true },
     patient: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicPatient' },
     visit: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicVisit' },
+    appointmentNumber: { type: String, trim: true },
+    dailySequence: { type: Number },
+    appointmentDate: { type: String },
     createdBy: actor,
   },
   { timestamps: true }
@@ -139,9 +166,9 @@ const clinicRegistrationLinkSchema = new mongoose.Schema(
 clinicRegistrationLinkSchema.index({ provider: 1, createdAt: -1 });
 
 clinicRegistrationLinkSchema.pre('save', async function assignCode(next) {
-  if (this.code) return next();
-  const count = await this.constructor.countDocuments();
-  this.code = `RL-${10001 + count}`;
+  if (!this.code) {
+    this.code = await nextCode('reglink', 'RL', 5, 10001);
+  }
   if (!this.expiresAt) {
     this.expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000);
   }
@@ -153,6 +180,9 @@ clinicRegistrationLinkSchema.set('toJSON', {
     id: ret._id.toString(),
     code: ret.code,
     token: ret.token,
+    appointmentNumber: ret.appointmentNumber || ret.visit?.appointmentNumber || (ret.dailySequence ? String(ret.dailySequence).padStart(3, '0') : '') || ret.visit?.code || '',
+    dailySequence: ret.dailySequence || ret.visit?.dailySequence,
+    appointmentDate: ret.appointmentDate || ret.visit?.appointmentDate,
     provider: ret.provider?.toString(),
     providerId: ret.provider?.toString(),
     providerName: ret.providerName,
@@ -176,6 +206,8 @@ clinicRegistrationLinkSchema.set('toJSON', {
     visitId: ret.visit?._id ? ret.visit._id.toString() : ret.visit?.toString(),
     visit: ret.visit?._id ? {
       id: ret.visit._id.toString(),
+      appointmentNumber: ret.visit.appointmentNumber || ret.visit.code || '',
+      code: ret.visit.code || ret.visit.appointmentNumber || '',
       visitDate: ret.visit.visitDate,
       symptoms: ret.visit.symptoms,
       diagnosis: ret.visit.diagnosis,

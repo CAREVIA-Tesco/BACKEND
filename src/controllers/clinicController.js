@@ -139,7 +139,33 @@ export const listPatients = asyncHandler(async (req, res) => {
   const q = clean(req.query.search, 60);
   if (q) {
     const rx = new RegExp(escapeRx(q), 'i');
-    filter.$or = [{ name: rx }, { phone: new RegExp(escapeRx(q.replace(/\D/g, '') || q)) }, { code: rx }];
+    const num = parseInt(q.replace(/\D/g, ''), 10);
+    const padded = !Number.isNaN(num) ? String(num).padStart(3, '0') : null;
+
+    const visitOr = [
+      { appointmentNumber: rx },
+      { code: rx },
+    ];
+    if (padded) {
+      visitOr.push({ appointmentNumber: padded });
+      visitOr.push({ code: padded });
+    }
+    if (!Number.isNaN(num)) {
+      visitOr.push({ dailySequence: num });
+    }
+
+    const matchingVisits = await ClinicVisit.find({
+      ...scope(provider),
+      $or: visitOr,
+    }).select('patient').lean();
+    const patientIdsFromVisits = matchingVisits.map((v) => v.patient).filter(Boolean);
+
+    filter.$or = [
+      { name: rx },
+      { phone: new RegExp(escapeRx(q.replace(/\D/g, '') || q)) },
+      { code: rx },
+      ...(patientIdsFromVisits.length ? [{ _id: { $in: patientIdsFromVisits } }] : []),
+    ];
   }
   const limit = Math.min(Number(req.query.limit) || 200, 1000);
   const patients = await ClinicPatient.find(filter).sort({ lastVisitAt: -1, createdAt: -1 }).limit(limit);
@@ -221,8 +247,10 @@ export const createVisit = asyncHandler(async (req, res) => {
       return res.status(409).json({ success: false, duplicate: true, message: `${patient.name} already has a visit saved for this date. Open it to update, or save this as another visit.`, visit: same, patient });
     }
   }
+  const appointmentDate = isoDay(fields.visitDate);
   const visit = await ClinicVisit.create({
     ...fields,
+    appointmentDate,
     provider: provider._id,
     providerName: provider.name,
     patient: patient._id,
@@ -231,7 +259,18 @@ export const createVisit = asyncHandler(async (req, res) => {
   });
   await refreshPatientStats(patient._id);
   const fresh = await ClinicPatient.findById(patient._id);
-  res.status(201).json({ success: true, message: isNewPatient ? `New patient ${fresh.code} added and visit saved` : `Visit saved for ${fresh.name} (${fresh.code})`, visit, patient: fresh, isNewPatient });
+  res.status(201).json({
+    success: true,
+    message: isNewPatient
+      ? `New patient ${fresh.code} added. Appointment No. ${visit.appointmentNumber || visit.code}`
+      : `Visit saved for ${fresh.name}. Appointment No. ${visit.appointmentNumber || visit.code}`,
+    appointmentNumber: visit.appointmentNumber || visit.code,
+    dailySequence: visit.dailySequence,
+    appointmentDate: visit.appointmentDate,
+    visit,
+    patient: fresh,
+    isNewPatient,
+  });
 });
 
 // PUT /api/clinic/visits/:id
@@ -252,20 +291,48 @@ export const deleteVisit = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Visit deleted' });
 });
 
-// GET /api/clinic/visits?from=&to=&search=  (doctor/nurse: own; admin: all or ?providerId=)
+// GET /api/clinic/visits?from=&to=&date=&search=  (doctor/nurse: own; admin: all or ?providerId=)
 export const listVisits = asyncHandler(async (req, res) => {
   const provider = await clinicProvider(req);
   const filter = { ...scope(provider) };
-  const r = dateRange(req.query);
-  if (r) filter.visitDate = r;
+
+  if (req.query.date) {
+    const single = String(req.query.date).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(single)) {
+      filter.visitDate = { $gte: dayStart(single), $lt: nextDay(single) };
+    }
+  } else {
+    const r = dateRange(req.query);
+    if (r) filter.visitDate = r;
+  }
+
   const q = clean(req.query.search, 60);
   if (q) {
     const rx = new RegExp(escapeRx(q), 'i');
     const pats = await ClinicPatient.find({ ...scope(provider), $or: [{ name: rx }, { code: rx }, { phone: new RegExp(escapeRx(q.replace(/\D/g, '') || q)) }] }).select('_id');
-    filter.$or = [{ patient: { $in: pats.map((p) => p._id) } }, { diagnosis: rx }, { symptoms: rx }, { providerName: rx }];
+    const num = parseInt(q.replace(/\D/g, ''), 10);
+    const padded = !Number.isNaN(num) ? String(num).padStart(3, '0') : null;
+
+    const orClauses = [
+      { patient: { $in: pats.map((p) => p._id) } },
+      { patientName: rx },
+      { diagnosis: rx },
+      { symptoms: rx },
+      { providerName: rx },
+      { appointmentNumber: rx },
+      { code: rx },
+    ];
+    if (padded) {
+      orClauses.push({ appointmentNumber: padded });
+      orClauses.push({ code: padded });
+    }
+    if (!Number.isNaN(num)) {
+      orClauses.push({ dailySequence: num });
+    }
+    filter.$or = orClauses;
   }
   const limit = Math.min(Number(req.query.limit) || 500, 5000);
-  const visits = await ClinicVisit.find(filter).sort({ visitDate: -1 }).limit(limit).populate('patient', 'code name age gender phone');
+  const visits = await ClinicVisit.find(filter).sort({ visitDate: -1, createdAt: -1 }).limit(limit).populate('patient', 'code name age gender phone');
   res.json({ success: true, visits });
 });
 
@@ -297,10 +364,18 @@ async function buildReport(q, providers) {
   const todayMap = map(todayCounts);
   const monthMap = map(monthCounts);
 
-  // daily series across the range
+  // daily series across the range with visits and unique patients count
   const daily = {};
-  for (let d = dayStart(from); d < nextDay(to); d = new Date(d.getTime() + 86400000)) daily[isoDay(d)] = 0;
-  visits.forEach((v) => { const k = isoDay(v.visitDate); if (k in daily) daily[k] += 1; });
+  for (let d = dayStart(from); d < nextDay(to); d = new Date(d.getTime() + 86400000)) {
+    daily[isoDay(d)] = { visits: 0, patients: new Set() };
+  }
+  visits.forEach((v) => {
+    const k = isoDay(v.visitDate);
+    if (k in daily) {
+      daily[k].visits += 1;
+      if (v.patient) daily[k].patients.add(String(v.patient));
+    }
+  });
   const monthly = {};
   visits.forEach((v) => { const k = isoDay(v.visitDate).slice(0, 7); monthly[k] = (monthly[k] || 0) + 1; });
 
@@ -332,7 +407,7 @@ async function buildReport(q, providers) {
       todayVisits: Object.values(todayMap).reduce((a, b) => a + b, 0),
       monthVisits: Object.values(monthMap).reduce((a, b) => a + b, 0),
     },
-    daily: Object.entries(daily).map(([date, visitsCount]) => ({ date, visits: visitsCount })),
+    daily: Object.entries(daily).map(([date, d]) => ({ date, visits: d.visits, patients: d.patients?.size || 0 })),
     monthly: Object.entries(monthly).sort().map(([month, n]) => ({ month, visits: n })),
     doctors,
   };
@@ -399,6 +474,7 @@ export const listRegistrationLinks = asyncHandler(async (req, res) => {
     filter.$or = [
       { patientName: rx },
       { code: rx },
+      { appointmentNumber: rx },
       { patientPhone: new RegExp(escapeRx(q.replace(/\D/g, '') || q)) },
       { recordedBy: rx },
       { notes: rx },
@@ -624,6 +700,8 @@ export const submitPublicRegistration = asyncHandler(async (req, res) => {
   nurseNotesParts.push(`[Online Registration via link ${link.code}]`);
   if (link.recordedBy) nurseNotesParts.push(`Link generated by: ${link.recordedBy}`);
 
+  const appointmentDate = isoDay(visitDate);
+
   // Create ClinicVisit
   const visit = await ClinicVisit.create({
     provider: provider._id,
@@ -631,6 +709,7 @@ export const submitPublicRegistration = asyncHandler(async (req, res) => {
     patient: patient._id,
     patientName: patient.name,
     visitDate,
+    appointmentDate,
     symptoms: compiledSymptoms,
     nurseNotes: nurseNotesParts.join(' | '),
     recordedBy: link.recordedBy ? `${link.recordedBy} (Shared Link)` : 'Online Registration',
@@ -651,27 +730,31 @@ export const submitPublicRegistration = asyncHandler(async (req, res) => {
   link.patientName = patient.name;
   link.patientPhone = patient.phone;
   link.visit = visit._id;
+  link.appointmentNumber = visit.appointmentNumber || visit.code;
+  link.dailySequence = visit.dailySequence;
+  link.appointmentDate = visit.appointmentDate;
   await link.save();
 
   // Notify doctor & admin
   await notifyProvider(provider._id, {
     type: 'clinic',
     title: 'New patient registered online',
-    body: `${patient.name} (${patient.code}) submitted clinic registration form.`,
+    body: `${patient.name} (${patient.code}) submitted clinic registration form. Appointment No. ${visit.appointmentNumber || visit.code}`,
     link: '/doctor/dashboard?tab=Patient%20Visits',
   });
   await notifyAdmins({
     type: 'clinic',
     title: 'Online patient registration received',
-    body: `${patient.name} registered online for Dr. ${provider.name} (${link.code}).`,
+    body: `${patient.name} registered online for Dr. ${provider.name} (Appointment No. ${visit.appointmentNumber || visit.code}).`,
     link: '/admin/clinic-records',
   });
 
   res.status(201).json({
     success: true,
-    message: isNewPatient
-      ? `Registration successful! New patient ${patient.code} registered.`
-      : `Registration successful! Visit linked to existing record ${patient.code}.`,
+    message: `Registration Successful! Your Appointment Number is ${visit.appointmentNumber || visit.code}.`,
+    appointmentNumber: visit.appointmentNumber || visit.code,
+    dailySequence: visit.dailySequence,
+    appointmentDate: visit.appointmentDate,
     patient: {
       id: patient._id.toString(),
       code: patient.code,
@@ -683,7 +766,12 @@ export const submitPublicRegistration = asyncHandler(async (req, res) => {
     },
     visit: {
       id: visit._id.toString(),
+      appointmentNumber: visit.appointmentNumber || visit.code,
+      code: visit.code || visit.appointmentNumber,
+      dailySequence: visit.dailySequence,
+      appointmentDate: visit.appointmentDate,
       visitDate: visit.visitDate,
+      source: visit.source,
     },
     doctor: {
       name: provider.name,

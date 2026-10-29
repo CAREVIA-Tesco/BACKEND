@@ -42,7 +42,7 @@ const appointmentSchema = new mongoose.Schema(
 
 appointmentSchema.pre('save', async function assignCode(next) {
   if (this.code) return next();
-  this.code = await nextCode('appointment', 'APT');
+  this.code = await nextCode('appointment', 'APPT', 3);
   next();
 });
 
@@ -56,6 +56,7 @@ appointmentSchema.set('toJSON', {
     return {
       id,
       code: ret.code,
+      appointmentNumber: ret.code,
       // fields used by doctor & patient dashboards
       date: dateLabel(ret.scheduledAt),
       time: ret.rescheduled
