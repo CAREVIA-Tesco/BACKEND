@@ -17,6 +17,9 @@ const userSchema = new mongoose.Schema(
     state: String,
     locality: String,
     careFor: { type: String, enum: ['Myself', 'Parent', 'Spouse', 'Child', 'Other', null], default: null }, // who the patient account books care for
+    patientName: String, // when care is for someone else
+    careNeed: String, // "What care do you need?" asked at sign-up / login
+    careNeedDetail: String, // the follow-up answer (symptoms, problem area, hours …)
     bloodGroup: String,
     allergies: [String],
     conditions: [String],

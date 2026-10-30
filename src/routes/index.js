@@ -3,6 +3,7 @@ import { protect, optionalAuth, authorize } from '../middleware/auth.js';
 import { ApiError } from '../middleware/error.js';
 import * as auth from '../controllers/authController.js';
 import * as providers from '../controllers/providerController.js';
+import * as customerReviews from '../controllers/customerReviewController.js';
 import * as appointments from '../controllers/appointmentController.js';
 import * as admin from '../controllers/adminController.js';
 import * as catalog from '../controllers/catalogController.js';
@@ -70,6 +71,15 @@ router.post('/auth/verify-otp', passwordReset.verifyOtp);
 router.post('/auth/reset-password', passwordReset.resetPassword);
 
 // Providers (doctors & care professionals)
+// Happy Customers: reviews added by the admin team (text or video)
+router.get('/customer-reviews', customerReviews.publicReviews);
+router.get('/media/review-videos/:id', customerReviews.streamVideo);
+router.get('/admin/customer-reviews', ...adminOnly, customerReviews.adminReviews);
+router.post('/admin/customer-reviews', ...adminOnly, customerReviews.createReview);
+router.put('/admin/customer-reviews/:id', ...adminOnly, customerReviews.updateReview);
+router.delete('/admin/customer-reviews/:id', ...adminOnly, customerReviews.deleteReview);
+router.post('/admin/review-videos', ...adminOnly, customerReviews.uploadVideo);
+
 router.get('/providers', optionalAuth, providers.listProviders);
 router.get('/providers/me', protect, authorize('doctor'), providers.myProvider);
 router.post('/providers/onboarding', protect, authorize('doctor'), providers.submitOnboarding);

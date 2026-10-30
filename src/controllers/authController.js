@@ -80,6 +80,9 @@ export const register = asyncHandler(async (req, res) => {
       extra.age = age;
     }
     if (b.gender) extra.gender = String(b.gender).trim();
+    if (b.patientName && b.careFor && b.careFor !== 'Myself') extra.patientName = String(b.patientName).trim().slice(0, 80);
+    if (b.careNeed) extra.careNeed = String(b.careNeed).trim().slice(0, 60);
+    if (b.careNeedDetail) extra.careNeedDetail = String(b.careNeedDetail).trim().slice(0, 200);
     if (b.city) extra.city = String(b.city).trim().slice(0, 80);
     ['district', 'state'].forEach((k) => { if (b[k]) extra[k] = String(b[k]).trim().slice(0, 80); });
     if (b.locality) extra.locality = String(b.locality).trim().slice(0, 120);
@@ -175,7 +178,10 @@ export const updateMe = asyncHandler(async (req, res) => {
   if (b.age !== undefined && b.age !== '' && (!Number.isFinite(Number(b.age)) || Number(b.age) < 0 || Number(b.age) > 120)) throw new ApiError(400, 'Please enter a valid age');
   if (b.careFor !== undefined && b.careFor !== '' && !['Myself', 'Parent', 'Spouse', 'Child', 'Other'].includes(b.careFor)) throw new ApiError(400, 'Invalid value for who needs care');
 
-  const allowed = ['name', 'age', 'gender', 'city', 'pincode', 'careFor', 'phone', 'email', 'bloodGroup', 'emergencyContact'];
+  const allowed = ['name', 'age', 'gender', 'city', 'pincode', 'careFor', 'phone', 'email', 'bloodGroup', 'emergencyContact', 'careNeed'];
+  // answers that may also be cleared
+  if (b.patientName !== undefined) req.user.patientName = (b.careFor || req.user.careFor) === 'Myself' ? undefined : String(b.patientName || '').trim().slice(0, 80) || undefined;
+  if (b.careNeedDetail !== undefined) req.user.careNeedDetail = String(b.careNeedDetail || '').trim().slice(0, 200) || undefined;
   ['allergies', 'conditions'].forEach((k) => {
     if (b[k] !== undefined) req.user[k] = (Array.isArray(b[k]) ? b[k] : String(b[k]).split(',')).map((x) => String(x).trim()).filter(Boolean);
   });
