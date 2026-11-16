@@ -4,6 +4,7 @@ import { ApiError } from '../middleware/error.js';
 import * as auth from '../controllers/authController.js';
 import * as providers from '../controllers/providerController.js';
 import * as customerReviews from '../controllers/customerReviewController.js';
+import * as businessPartners from '../controllers/businessPartnerController.js';
 import * as appointments from '../controllers/appointmentController.js';
 import * as admin from '../controllers/adminController.js';
 import * as catalog from '../controllers/catalogController.js';
@@ -72,6 +73,13 @@ router.post('/auth/reset-password', passwordReset.resetPassword);
 
 // Providers (doctors & care professionals)
 // Happy Customers: reviews added by the admin team (text or video)
+// Business partners (clinics, labs, agencies …) – separate from doctor registration; reviewed in the admin panel
+router.get('/business-partners/options', businessPartners.partnerOptions);
+router.post('/business-partners', businessPartners.registerPartner);
+router.get('/admin/business-partners', ...adminOnly, businessPartners.listPartners);
+router.patch('/admin/business-partners/:id', ...adminOnly, businessPartners.updatePartner);
+router.delete('/admin/business-partners/:id', ...adminOnly, businessPartners.deletePartner);
+
 router.get('/customer-reviews', customerReviews.publicReviews);
 router.get('/media/review-videos/:id', customerReviews.streamVideo);
 router.get('/admin/customer-reviews', ...adminOnly, customerReviews.adminReviews);
