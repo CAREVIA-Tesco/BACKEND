@@ -3,7 +3,7 @@ import Appointment from '../models/Appointment.js';
 import User from '../models/User.js';
 import { Service } from '../models/Catalog.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
-import { specFor, isDoctorProfession, isValidAadhaar } from '../utils/format.js';
+import { specFor, isDoctorProfession, isValidAadhaar, uniqueProviders } from '../utils/format.js';
 import { notifyAdmins, notifyProvider, LINKS } from '../services/notify.js';
 import { TYPES, cleanHours, offersOf, scheduleUnion, hasHours, hoursText } from '../utils/slots.js';
 import { slotCalendar } from '../services/slotBooking.js';
@@ -262,7 +262,8 @@ export const listProviders = asyncHandler(async (req, res) => {
   }
   const inactiveServices = await Service.find({ status: 'Inactive' }).select('name key');
   const inactiveSet = new Set(inactiveServices.flatMap((s) => [s.name?.toLowerCase().trim(), s.key?.toLowerCase().trim()]).filter(Boolean));
-  res.json({ success: true, count: providers.length, providers: providers.map((p) => publicProvider(p, inactiveSet)) });
+  const unique = uniqueProviders(providers); // a profile saved twice is listed once
+  res.json({ success: true, count: unique.length, providers: unique.map((p) => publicProvider(p, inactiveSet)) });
 });
 
 // GET /api/providers/me  (logged-in doctor's own profile)

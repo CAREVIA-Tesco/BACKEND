@@ -2,17 +2,19 @@ import Provider from '../models/Provider.js';
 import Appointment from '../models/Appointment.js';
 import Review from '../models/Review.js';
 import { asyncHandler } from '../middleware/error.js';
+import { uniqueProviders } from '../utils/format.js';
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
 // GET /api/public/stats – real numbers for the marketing pages (no hard-coded "500+")
 export const publicStats = asyncHandler(async (_req, res) => {
-  const [providers, completed, reviews] = await Promise.all([
-    Provider.find({ status: 'ACTIVE' }).select('spec isDoctor city fee clinicFee onlineFee').lean(),
+  const [allProviders, completed, reviews] = await Promise.all([
+    Provider.find({ status: 'ACTIVE' }).select('name user phone experience spec isDoctor city fee clinicFee onlineFee').lean(),
     Appointment.find({ status: 'Completed' }).select('providerSpec patientUser patientName patientPhone').lean(),
     Review.find().select('rating provider').lean(),
   ]);
 
+  const providers = uniqueProviders(allProviders); // a profile saved twice is counted once
   const bySpec = {};
   providers.forEach((p) => {
     bySpec[p.spec] = bySpec[p.spec] || { providers: 0, completedVisits: 0, rating: null, reviews: 0, minFee: null, ids: [] };

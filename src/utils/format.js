@@ -91,3 +91,16 @@ export function feeFor(provider, consultationType, isDoctorCategory) {
   }
   return provider.fee || provider.clinicFee || 0;
 }
+
+// A professional whose profile was saved more than once (same login, or the same name, speciality, city,
+// experience and phone) is listed / counted once on the website. The admin panel still shows every record.
+export function uniqueProviders(list = []) {
+  const seen = new Set();
+  return list.filter((p) => {
+    const name = String(p.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const keys = [p.user && `u:${p.user}`, name && `n:${name}|${p.spec || ''}|${String(p.city || '').toLowerCase()}|${p.experience ?? ''}|${String(p.phone || '').replace(/\D/g, '').slice(-10)}`].filter(Boolean);
+    if (keys.some((k) => seen.has(k))) return false;
+    keys.forEach((k) => seen.add(k));
+    return true;
+  });
+}
