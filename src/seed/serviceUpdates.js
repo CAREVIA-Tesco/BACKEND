@@ -8,7 +8,7 @@ import { Service } from '../models/Catalog.js';
 import Provider from '../models/Provider.js';
 import SiteContent from '../models/SiteContent.js';
 import Counter from '../models/Counter.js';
-import { isRemovedService, RENAMED_SERVICES, PROFESSION_VISIT_TYPES } from '../utils/serviceRules.js';
+import { isRemovedService, RENAMED_SERVICES, PROFESSION_VISIT_TYPES, visitTypesForService, DUTY_HOURS, DUTY_HOUR_SERVICES } from '../utils/serviceRules.js';
 
 const TYPES = ['home', 'clinic', 'online'];
 
@@ -44,6 +44,14 @@ async function run() {
     if (!(homeo.professions || []).includes('BHMS')) { homeo.professions = [...(homeo.professions || ['Homeopathy Doctor']), 'BHMS']; mod = true; }
     if (/at home or online/.test(homeo.desc || '')) { homeo.desc = homeo.desc.replace('at home or online', 'at the clinic or online'); mod = true; }
     if (mod) await homeo.save();
+  }
+
+  // visit types / duty hours are set per service in Admin → Services; services saved before that get the defaults
+  for (const svc of await Service.find({ $or: [{ visitTypes: { $exists: false } }, { dutyHours: { $exists: false } }] }).select('key visitTypes dutyHours').lean()) {
+    const set = {};
+    if (!Array.isArray(svc.visitTypes)) set.visitTypes = visitTypesForService(svc.key);
+    if (!Array.isArray(svc.dutyHours)) set.dutyHours = DUTY_HOUR_SERVICES.includes(svc.key) ? [...DUTY_HOURS] : [];
+    if (Object.keys(set).length) await Service.updateOne({ _id: svc._id }, { $set: set });
   }
 
   // 3. BHS professionals -> BHMS (homeopathy)

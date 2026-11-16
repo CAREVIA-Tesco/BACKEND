@@ -37,6 +37,9 @@ const serviceSchema = new mongoose.Schema(
     matches: [String],
     // Professions that can offer this service during registration (e.g. 'MBBS Doctor', 'Nurse', 'Physiotherapist', etc.)
     professions: [{ type: String, trim: true }],
+    // how patients can book it (home / clinic / online) and the duty-hour options asked in Book Now (24 / 12 / 6 Hours)
+    visitTypes: { type: [String], default: undefined },
+    dutyHours: { type: [String], default: undefined },
     status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
   },
   { timestamps: true }

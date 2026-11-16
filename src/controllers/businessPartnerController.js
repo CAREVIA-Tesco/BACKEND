@@ -2,10 +2,9 @@ import BusinessPartner, { PARTNER_STATUSES, BUSINESS_CATEGORIES } from '../model
 import { nextCode } from '../models/Counter.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
 import { notifyAdmins } from '../services/notify.js';
+import { cleanMobile, isEmail, isName } from '../utils/validate.js';
 
 const clean = (v, max = 200) => String(v ?? '').trim().slice(0, max);
-const digits = (v) => String(v || '').replace(/\D/g, '').slice(-10);
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const PARTNER_SERVICES = [
   'Doctor consultations', 'Home visits', 'Nursing care', 'Caretaker / attendant services', 'Physiotherapy',
   'Lab tests & sample collection', 'Scans & imaging', 'Pharmacy & medicine delivery', 'Ambulance',
@@ -24,7 +23,7 @@ export const registerPartner = asyncHandler(async (req, res) => {
     categoryOther: clean(b.categoryOther, 80),
     contactPerson: clean(b.contactPerson, 100),
     designation: clean(b.designation, 80),
-    phone: digits(b.phone),
+    phone: cleanMobile(b.phone),
     email: clean(b.email, 120).toLowerCase(),
     website: clean(b.website, 200),
     address: clean(b.address, 300),
@@ -44,9 +43,9 @@ export const registerPartner = asyncHandler(async (req, res) => {
   if (!f.businessName) throw new ApiError(400, 'Please enter your business name');
   if (!BUSINESS_CATEGORIES.includes(f.category)) throw new ApiError(400, 'Please choose your business category');
   if (f.category === 'Other' && !f.categoryOther) throw new ApiError(400, 'Please type your business category');
-  if (!f.contactPerson) throw new ApiError(400, 'Please enter the contact person’s name');
-  if (!/^[6-9]\d{9}$/.test(f.phone)) throw new ApiError(400, 'Please enter a valid 10-digit mobile number');
-  if (!EMAIL.test(f.email)) throw new ApiError(400, 'Please enter a valid email address');
+  if (!isName(f.contactPerson)) throw new ApiError(400, 'Please enter the contact person’s full name (letters only)');
+  if (!f.phone) throw new ApiError(400, 'Please enter a valid 10-digit mobile number');
+  if (!isEmail(f.email)) throw new ApiError(400, 'Please enter a valid email address');
   if (!f.address) throw new ApiError(400, 'Please enter the business address');
   if (!/^[1-9]\d{5}$/.test(f.pincode)) throw new ApiError(400, 'Please enter a valid 6-digit PIN code');
   if (!f.city) throw new ApiError(400, 'Please enter the city');

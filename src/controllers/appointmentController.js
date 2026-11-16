@@ -1,6 +1,7 @@
 import User from '../models/User.js';
 import Appointment from '../models/Appointment.js';
 import Provider from '../models/Provider.js';
+import { Service } from '../models/Catalog.js';
 import Payment from '../models/Payment.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
 import { feeFor } from '../utils/format.js';
@@ -96,7 +97,9 @@ export const createAppointment = asyncHandler(async (req, res) => {
   const provider = await Provider.findById(providerId);
   if (!provider || provider.status !== 'ACTIVE') throw new ApiError(404, 'This professional is not available for booking');
   // visit types allowed for this profession / service (e.g. nurses: home visits only; homeopathy: no home visits)
-  const allowedTypes = (visitTypesForProfession(provider.profession) || ['home', 'clinic', 'online']).filter((t) => !serviceType || visitTypesForService(serviceType).includes(t));
+  const svcDoc = serviceType ? await Service.findOne({ key: serviceType }).select('visitTypes').lean() : null;
+  const serviceTypes = svcDoc?.visitTypes?.length ? svcDoc.visitTypes : serviceType ? visitTypesForService(serviceType) : ['home', 'clinic', 'online'];
+  const allowedTypes = (visitTypesForProfession(provider.profession) || ['home', 'clinic', 'online']).filter((t) => serviceTypes.includes(t));
   if (!allowedTypes.includes(consultationType)) throw new ApiError(400, `${provider.name} can be booked for ${allowedTypes.map((t) => TYPE_LABEL[t].toLowerCase()).join(' or ') || 'another service'} only.`);
 
   const scheduledAt = combine(date, time);

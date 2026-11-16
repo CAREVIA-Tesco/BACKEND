@@ -7,6 +7,7 @@ import { notifyAdmins, notifyUser, notifyUsers, notifyAppointment, LINKS } from 
 import { checkSlot } from '../services/slotBooking.js';
 import { offersOf, TYPE_LABEL } from '../utils/slots.js';
 import { Service } from '../models/Catalog.js';
+import { cleanMobile, isEmail, isName } from '../utils/validate.js';
 import { visitTypesForService, isRemovedService, RENAMED_SERVICES, DUTY_HOURS, DUTY_HOUR_SERVICES, LAB_TESTS } from '../utils/serviceRules.js';
 import Payment from '../models/Payment.js';
 
@@ -47,15 +48,16 @@ export const createEnquiry = asyncHandler(async (req, res) => {
   const email = clean(b.email, 120) || (type === 'contact' || type === 'partner' ? undefined : req.user?.email);
 
   if (!name) throw new ApiError(400, 'Please enter your name');
-  if (digits(phone).length < 10) throw new ApiError(400, 'Please enter a valid 10-digit mobile number');
-  if (email && !EMAIL.test(email)) throw new ApiError(400, 'Please enter a valid email address');
+  if (name !== 'Website visitor' && !isName(name)) throw new ApiError(400, 'Please enter a valid name (letters only)');
+  if (!cleanMobile(phone)) throw new ApiError(400, 'Please enter a valid 10-digit mobile number');
+  if (email && !isEmail(email)) throw new ApiError(400, 'Please enter a valid email address');
   if ((type === 'callback' || type === 'plan' || type === 'requirement' || type === 'referral') && !clean(b.service)) throw new ApiError(400, 'Please choose the service you need');
   if (type === 'contact' && !clean(b.message, 2000)) throw new ApiError(400, 'Please type your message');
   if (type === 'partner' && !clean(b.organisation)) throw new ApiError(400, 'Please enter your organisation name');
   if (type === 'referral') {
     if (!clean(b.referrerName, 100)) throw new ApiError(400, 'Please enter your name');
     if (digits(b.referrerPhone).length < 10) throw new ApiError(400, 'Please enter your 10-digit mobile number');
-    if (digits(b.referrerPhone) === digits(phone)) throw new ApiError(400, "Your friend's number must be different from yours");
+    if (digits(b.referrerPhone) === cleanMobile(phone)) throw new ApiError(400, "Your friend's number must be different from yours");
   }
   if (type === 'booking') {
     if (!clean(b.city, 80)) throw new ApiError(400, 'Please enter the city where you need the service');
@@ -74,13 +76,14 @@ export const createEnquiry = asyncHandler(async (req, res) => {
   }
   const serviceKey = serviceDoc?.key;
   if (serviceKey && b.visitType) {
-    const allowed = visitTypesForService(serviceKey);
+    const allowed = serviceDoc.visitTypes?.length ? serviceDoc.visitTypes : visitTypesForService(serviceKey);
     if (!allowed.includes(b.visitType)) throw new ApiError(400, `${serviceName} is available as ${allowed.map((t) => TYPE_LABEL[t].toLowerCase()).join(' or ')} only.`);
   }
   let dutyHours;
-  if (serviceKey && DUTY_HOUR_SERVICES.includes(serviceKey)) {
-    if (b.dutyHours && !DUTY_HOURS.includes(b.dutyHours)) throw new ApiError(400, `Please choose duty hours: ${DUTY_HOURS.join(', ')}`);
-    if (!b.dutyHours && type === 'booking') throw new ApiError(400, 'Please choose the duty hours you need (24, 12 or 6 hours)');
+  const dutyOptions = Array.isArray(serviceDoc?.dutyHours) ? serviceDoc.dutyHours : serviceKey && DUTY_HOUR_SERVICES.includes(serviceKey) ? DUTY_HOURS : [];
+  if (serviceKey && dutyOptions.length) {
+    if (b.dutyHours && !dutyOptions.includes(b.dutyHours)) throw new ApiError(400, `Please choose duty hours: ${dutyOptions.join(', ')}`);
+    if (!b.dutyHours && type === 'booking') throw new ApiError(400, `Please choose the duty hours you need (${dutyOptions.join(', ')})`);
     dutyHours = b.dutyHours || undefined;
   }
   let labTests;
@@ -124,7 +127,7 @@ export const createEnquiry = asyncHandler(async (req, res) => {
 
   // avoid duplicate leads when the same number submits the same request twice in 10 minutes
   const recentList = await Enquiry.find({
-    phone: { $regex: `${digits(phone)}$` },
+    phone: { $regex: `${cleanMobile(phone)}$` },
     type,
     service: clean(b.service),
     status: 'New',
@@ -145,7 +148,7 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     requestedProviderName: requested?.name,
     requestedProviderSpec: requested?.spec,
     name,
-    phone: digits(phone),
+    phone: cleanMobile(phone),
     email,
     city: clean(b.city, 80),
     pincode: /^[1-9]\d{5}$/.test(String(b.pincode || '').trim()) ? String(b.pincode).trim() : undefined,

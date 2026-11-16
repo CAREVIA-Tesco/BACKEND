@@ -1,4 +1,5 @@
 import { Specialization, Service } from '../models/Catalog.js';
+import { DUTY_HOURS } from '../utils/serviceRules.js';
 import Provider from '../models/Provider.js';
 import Appointment from '../models/Appointment.js';
 import { ApiError, asyncHandler } from '../middleware/error.js';
@@ -42,7 +43,7 @@ async function serviceCounts(svc) {
 }
 
 const slugify = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-const SERVICE_FIELDS = ['name', 'key', 'short', 'desc', 'price', 'image', 'order', 'icon', 'matches', 'professions', 'status'];
+const SERVICE_FIELDS = ['name', 'key', 'short', 'desc', 'price', 'image', 'order', 'icon', 'matches', 'professions', 'status', 'visitTypes', 'dutyHours'];
 function serviceBody(body) {
   const f = Object.fromEntries(SERVICE_FIELDS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
   if (typeof f.name === 'string') f.name = f.name.trim();
@@ -50,6 +51,11 @@ function serviceBody(body) {
   if (f.matches !== undefined) f.matches = (Array.isArray(f.matches) ? f.matches : String(f.matches).split(',')).map((m) => String(m).trim()).filter(Boolean);
   if (f.professions !== undefined) f.professions = (Array.isArray(f.professions) ? f.professions : String(f.professions).split(',')).map((m) => String(m).trim()).filter(Boolean);
   if (f.order !== undefined) f.order = Number(f.order) || 100;
+  if (f.visitTypes !== undefined) {
+    f.visitTypes = ['home', 'clinic', 'online'].filter((t) => (Array.isArray(f.visitTypes) ? f.visitTypes : []).includes(t));
+    if (!f.visitTypes.length) throw new ApiError(400, 'Choose at least one way patients can book this service (home visit, clinic visit or online)');
+  }
+  if (f.dutyHours !== undefined) f.dutyHours = DUTY_HOURS.filter((h) => (Array.isArray(f.dutyHours) ? f.dutyHours : []).includes(h));
   if (f.image && !/^(https?:\/\/|\/|data:image\/(jpeg|png|webp);base64,)/.test(f.image)) throw new ApiError(400, 'Image must be a link (https://...) or an uploaded picture');
   if (f.image && f.image.length > 900000) throw new ApiError(400, 'Image is too large – please use one under 600 KB');
   return f;
