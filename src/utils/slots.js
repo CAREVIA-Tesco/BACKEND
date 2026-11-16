@@ -9,6 +9,8 @@
 // Profiles saved before consultation types existed fall back to the fees (a fee = the type is offered)
 // and to the single weekly `schedule`.
 
+import { visitTypesForProfession } from './serviceRules.js';
+
 export const TYPES = ['home', 'clinic', 'online'];
 export const TYPE_LABEL = { home: 'Home visit', clinic: 'Clinic visit', online: 'Online consultation' };
 export const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -68,7 +70,18 @@ export function cleanHours(input) {
 }
 
 // { home, clinic, online } the doctor offers
+// what the professional offers, limited to the visit types their profession allows
+// (nurses, care takers and lab centres: home visits only; homeopathy: clinic and online only)
 export function offersOf(p) {
+  const base = savedOffers(p);
+  const allowed = visitTypesForProfession(p?.profession);
+  if (!allowed) return base;
+  const o = Object.fromEntries(TYPES.map((t) => [t, !!base[t] && allowed.includes(t)]));
+  if (!TYPES.some((t) => o[t])) o[allowed.includes('online') ? 'online' : allowed[0]] = true;
+  return o;
+}
+
+function savedOffers(p) {
   const ct = p?.consultTypes || {};
   if (TYPES.some((t) => typeof ct[t] === 'boolean')) return { home: !!ct.home, clinic: !!ct.clinic, online: !!ct.online };
   // older profiles: a fee means the type is offered

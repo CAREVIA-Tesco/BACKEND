@@ -6,7 +6,8 @@ import { ApiError, asyncHandler } from '../middleware/error.js';
 import { feeFor } from '../utils/format.js';
 import { syncEnquiryFromAppointment } from '../services/requestFlow.js';
 import { notifyAppointment } from '../services/notify.js';
-import { slotToMin, minTo12, istDay, atIST } from '../utils/slots.js';
+import { slotToMin, minTo12, istDay, atIST, TYPE_LABEL } from '../utils/slots.js';
+import { visitTypesForProfession, visitTypesForService } from '../utils/serviceRules.js';
 
 const TITLES = { online: 'Online Consultation', clinic: 'Clinic Consultation', home: 'Home Consultation' };
 const LOCATIONS = { online: 'Virtual', clinic: 'Main Clinic', home: 'Patient Home' };
@@ -94,6 +95,9 @@ export const createAppointment = asyncHandler(async (req, res) => {
 
   const provider = await Provider.findById(providerId);
   if (!provider || provider.status !== 'ACTIVE') throw new ApiError(404, 'This professional is not available for booking');
+  // visit types allowed for this profession / service (e.g. nurses: home visits only; homeopathy: no home visits)
+  const allowedTypes = (visitTypesForProfession(provider.profession) || ['home', 'clinic', 'online']).filter((t) => !serviceType || visitTypesForService(serviceType).includes(t));
+  if (!allowedTypes.includes(consultationType)) throw new ApiError(400, `${provider.name} can be booked for ${allowedTypes.map((t) => TYPE_LABEL[t].toLowerCase()).join(' or ') || 'another service'} only.`);
 
   const scheduledAt = combine(date, time);
   const today = new Date();

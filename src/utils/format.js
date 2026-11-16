@@ -56,13 +56,13 @@ const PROFESSION_SPEC = {
   Physiotherapist: 'Physiotherapist',
   Nurse: 'Nurse',
   Caretaker: 'Care Taker',
-  BHS: 'BHS',
+  BHMS: 'Homeopathy Doctor', // BHMS (homeopathy degree) professionals are listed under Homeopathy
   'Lab Centre': 'Lab Centre',
 };
 
-export const DOCTOR_PROFESSIONS = ['MBBS Doctor', 'Homeopathy Doctor', 'Ayurveda Doctor'];
+export const DOCTOR_PROFESSIONS = ['MBBS Doctor', 'Homeopathy Doctor', 'BHMS', 'Ayurveda Doctor'];
 // professions in the registration list; anything else was typed in with "Other" and is treated as a doctor
-export const LISTED_PROFESSIONS = [...DOCTOR_PROFESSIONS, 'Physiotherapist', 'Nurse', 'Caretaker', 'Lab Centre', 'BHS'];
+export const LISTED_PROFESSIONS = [...DOCTOR_PROFESSIONS, 'Physiotherapist', 'Nurse', 'Caretaker', 'Lab Centre'];
 export const isDoctorProfession = (p) => DOCTOR_PROFESSIONS.includes(p) || !LISTED_PROFESSIONS.includes(p);
 
 // Aadhaar: 12 digits, not starting with 0 or 1, with a valid Verhoeff check digit

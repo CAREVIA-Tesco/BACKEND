@@ -23,9 +23,10 @@ const SERVICE_SPECS = {
   'Care Taker': ['Care Taker'],
   'Baby Care': ['Pediatrician'],
   Ayurveda: ['Ayurveda Doctor'],
-  BHS: ['BHS'],
+  Homeopathy: ['Homeopathy Doctor'],
+  'Lab Tests': ['Lab Centre'],
 };
-const SERVICE_TYPE = { Physiotherapy: 'physiotherapy', 'Nurse Care': 'nurse-care', 'Home Doctor': 'home-doctor', 'Care Taker': 'care-taker', 'Baby Care': 'baby-care', Ayurveda: 'ayurveda', BHS: 'bhs' };
+const SERVICE_TYPE = { Physiotherapy: 'physiotherapy', 'Nurse Care': 'nurse-care', 'Home Doctor': 'home-doctor', 'Care Taker': 'care-taker', 'Baby Care': 'baby-care', Ayurveda: 'ayurveda', Homeopathy: 'homeopathy', 'Lab Tests': 'lab-tests' };
 const TITLES = { online: 'Online Consultation', clinic: 'Clinic Consultation', home: 'Home Consultation' };
 const LOCATIONS = { online: 'Virtual', clinic: 'Main Clinic', home: 'Patient Home' };
 const ACTIVE = ['Waiting', 'Confirmed'];
@@ -46,7 +47,7 @@ export function placeKey(v) {
 export function providerMatches(enquiry, provider) {
   if (!provider || provider.status !== 'ACTIVE') return false;
   const specs = SERVICE_SPECS[enquiry.service];
-  const serviceOk = specs ? specs.includes(provider.spec) : enquiry.service === 'Doctor Visit' ? provider.isDoctor : true;
+  const serviceOk = specs ? specs.includes(provider.spec) : ['Doctor Visit', 'General Medicine'].includes(enquiry.service) ? provider.isDoctor : true;
   // the city now comes from the PIN code (India Post district), so also compare districts and common old/new names
   const want = [enquiry.city, enquiry.district].map(placeKey).filter(Boolean);
   const have = [provider.city, provider.district].map(placeKey).filter(Boolean);

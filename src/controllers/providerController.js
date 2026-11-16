@@ -7,6 +7,7 @@ import { specFor, isDoctorProfession, isValidAadhaar } from '../utils/format.js'
 import { notifyAdmins, notifyProvider, LINKS } from '../services/notify.js';
 import { TYPES, cleanHours, offersOf, scheduleUnion, hasHours, hoursText } from '../utils/slots.js';
 import { slotCalendar } from '../services/slotBooking.js';
+import { visitTypesForProfession } from '../utils/serviceRules.js';
 
 // Validates that services selected by a provider belong to their profession
 export async function validateProviderServices(profession, services = [], servicesOffered = []) {
@@ -173,7 +174,17 @@ function assignFields(provider, fields) {
 }
 
 // consultation types + timings: check them and keep the weekly `schedule` (used by admin views) in step
+const TYPE_WORD = { home: 'home visits', clinic: 'clinic visits', online: 'online consultations' };
 function applyConsultation(provider, body) {
+  // some professions may only offer some visit types (e.g. nurses: home visits; homeopathy: clinic and online)
+  const allowed = visitTypesForProfession(provider.profession);
+  if (allowed) {
+    const ct = provider.consultTypes || {};
+    if (body.consultTypes && typeof body.consultTypes === 'object' && !allowed.some((t) => ct[t])) {
+      throw new ApiError(400, `${provider.profession === 'Homeopathy Doctor' || provider.profession === 'BHMS' ? 'Homeopathy' : provider.profession} professionals can offer ${allowed.map((t) => TYPE_WORD[t]).join(' or ')} only.`);
+    }
+    if (TYPES.some((t) => typeof ct[t] === 'boolean')) provider.consultTypes = Object.fromEntries(TYPES.map((t) => [t, !!ct[t] && allowed.includes(t)]));
+  }
   if (body.consultTypes && typeof body.consultTypes === 'object') {
     const offers = offersOf(provider);
     if (!TYPES.some((t) => offers[t])) throw new ApiError(400, 'Please choose at least one type of consultation you offer (home visit, clinic visit or online).');
@@ -338,7 +349,7 @@ export async function prepareNewProvider(body, account) {
     throw new ApiError(400, b.profession === 'Nurse' ? 'Please enter your nursing qualification' : 'Please enter your highest qualification');
   }
 
-  const needsRegistration = ['MBBS Doctor', 'Homeopathy Doctor', 'Ayurveda Doctor', 'Nurse'];
+  const needsRegistration = ['MBBS Doctor', 'Homeopathy Doctor', 'BHMS', 'Ayurveda Doctor', 'Nurse'];
   if (needsRegistration.includes(b.profession) && !String(b.registrationNumber || '').trim()) {
     throw new ApiError(400, `Please enter your ${b.profession === 'Nurse' ? 'nursing ' : ''}council registration number`);
   }

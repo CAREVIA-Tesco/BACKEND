@@ -56,6 +56,7 @@ export const register = asyncHandler(async (req, res) => {
 
   if (!name || !String(name).trim()) throw new ApiError(400, 'Full name is required');
   if (!password || String(password).length < 6) throw new ApiError(400, 'Password must be at least 6 characters');
+  if (req.body.confirmPassword !== undefined && String(req.body.confirmPassword) !== String(password)) throw new ApiError(400, 'Passwords do not match. Please enter the same password in Create Password and Confirm Password.');
 
   const query = identifierQuery(identifier);
   if (await User.findOne(query)) throw new ApiError(409, 'An account with this email/phone already exists. Please login.');
@@ -123,6 +124,7 @@ export const registerCheck = asyncHandler(async (req, res) => {
   const { name, password } = req.body;
   if (!name || !String(name).trim()) throw new ApiError(400, 'Full name is required');
   if (!password || String(password).length < 6) throw new ApiError(400, 'Password must be at least 6 characters');
+  if (req.body.confirmPassword !== undefined && String(req.body.confirmPassword) !== String(password)) throw new ApiError(400, 'Passwords do not match. Please enter the same password in Create Password and Confirm Password.');
   const query = identifierQuery(req.body.identifier);
   const existing = await User.findOne(query);
   if (existing) {

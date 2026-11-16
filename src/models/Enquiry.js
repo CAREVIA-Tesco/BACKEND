@@ -40,6 +40,8 @@ const enquirySchema = new mongoose.Schema(
     address: { type: String, trim: true }, // house / street for home visits
     visitType: { type: String, enum: ['home', 'online', 'clinic', null], default: null }, // asked in Book Now
     service: { type: String, trim: true },
+    dutyHours: { type: String, trim: true }, // Nurse Care / Care Taker / Baby Care: 24, 12 or 6 hours
+    labTests: [{ type: String, trim: true }], // Lab Tests: tests picked in Book Now
     // a specific doctor the patient asked for ("Book" on a doctor's card) – the care team arranges it
     requestedProvider: { type: mongoose.Schema.Types.ObjectId, ref: 'Provider' },
     requestedProviderName: String,
@@ -103,6 +105,8 @@ const base = (ret) => ({
   visitType: ret.visitType,
   visitTypeLabel: VISIT_LABEL[ret.visitType] || '',
   service: ret.service,
+  dutyHours: ret.dutyHours,
+  labTests: ret.labTests || [],
   requestedProviderId: ret.requestedProvider?.toString(),
   requestedProvider: ret.requestedProviderName,
   requestedProviderSpec: ret.requestedProviderSpec,

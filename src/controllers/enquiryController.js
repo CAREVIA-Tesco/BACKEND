@@ -5,7 +5,9 @@ import { providerMatches, matchingProviders, scheduleFromEnquiry, OPEN_STATUSES 
 import { ApiError, asyncHandler } from '../middleware/error.js';
 import { notifyAdmins, notifyUser, notifyUsers, notifyAppointment, LINKS } from '../services/notify.js';
 import { checkSlot } from '../services/slotBooking.js';
-import { offersOf } from '../utils/slots.js';
+import { offersOf, TYPE_LABEL } from '../utils/slots.js';
+import { Service } from '../models/Catalog.js';
+import { visitTypesForService, isRemovedService, RENAMED_SERVICES, DUTY_HOURS, DUTY_HOUR_SERVICES, LAB_TESTS } from '../utils/serviceRules.js';
 import Payment from '../models/Payment.js';
 
 const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
@@ -62,6 +64,29 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(String(b.preferredTime || ''))) throw new ApiError(400, 'Please choose a time');
   }
   if (b.consent === false) throw new ApiError(400, 'Please allow us to contact you about this request');
+
+  // service rules: removed services, visit types allowed per service, duty hours and lab tests
+  if (clean(b.service) && RENAMED_SERVICES[clean(b.service)]) b.service = RENAMED_SERVICES[clean(b.service)];
+  const serviceName = clean(b.service, 120);
+  const serviceDoc = serviceName ? await Service.findOne({ name: serviceName }).lean() : null;
+  if (serviceName && (isRemovedService({ name: serviceName }) || (serviceDoc && isRemovedService(serviceDoc)))) {
+    throw new ApiError(400, `${serviceName} is no longer offered. Please choose another service.`);
+  }
+  const serviceKey = serviceDoc?.key;
+  if (serviceKey && b.visitType) {
+    const allowed = visitTypesForService(serviceKey);
+    if (!allowed.includes(b.visitType)) throw new ApiError(400, `${serviceName} is available as ${allowed.map((t) => TYPE_LABEL[t].toLowerCase()).join(' or ')} only.`);
+  }
+  let dutyHours;
+  if (serviceKey && DUTY_HOUR_SERVICES.includes(serviceKey)) {
+    if (b.dutyHours && !DUTY_HOURS.includes(b.dutyHours)) throw new ApiError(400, `Please choose duty hours: ${DUTY_HOURS.join(', ')}`);
+    if (!b.dutyHours && type === 'booking') throw new ApiError(400, 'Please choose the duty hours you need (24, 12 or 6 hours)');
+    dutyHours = b.dutyHours || undefined;
+  }
+  let labTests;
+  if (serviceKey === 'lab-tests' && Array.isArray(b.labTests)) {
+    labTests = [...new Set(b.labTests.map((t) => String(t || '').trim()).filter((t) => LAB_TESTS.includes(t)))];
+  }
 
   let preferredDate;
   if (b.preferredDate) {
@@ -130,6 +155,8 @@ export const createEnquiry = asyncHandler(async (req, res) => {
     address: clean(b.address, 300),
     visitType: ['home', 'online', 'clinic'].includes(b.visitType) ? b.visitType : undefined,
     service: clean(b.service, 120),
+    dutyHours,
+    labTests,
     plan: clean(b.plan, 120),
     subject: clean(b.subject, 120),
     organisation: clean(b.organisation, 150),
@@ -325,6 +352,8 @@ const openView = (e) => ({
   district: e.district,
   visitType: e.visitType || 'home',
   service: e.service || 'General care',
+  dutyHours: e.dutyHours,
+  labTests: e.labTests || [],
   plan: e.plan,
   message: e.message,
   preferredDate: e.preferredDate,
